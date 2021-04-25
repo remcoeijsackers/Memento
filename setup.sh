@@ -30,7 +30,7 @@ else
 fi
 
 # -e needed for bash colour output
-if [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ]
+if [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 then 
   colr=""
 else
@@ -40,7 +40,7 @@ fi
 
 #make an alias
 append_src () {
-	if [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ]
+	if [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 	then
 		alname=$1
 		alcomm=$2
@@ -57,7 +57,7 @@ append_src () {
 
 #make a script globally exc
 make_global() {
-	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ]
+	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 	then
 		#rename script for find function
 		new_scriptname="$extention$1"
@@ -91,7 +91,7 @@ edit_script() {
 }
 
 list_aliases() {
-	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ]
+	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 	then
 		grep "alias made by $package" ~/.zshrc
 	elif [ $usedshell = "/bin/bash" ] || [ $usedshell = "bash" ]
@@ -107,7 +107,7 @@ list_scripts() {
 }
 
 list_tags() {
-	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ]
+	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 	then
 		grep "tag" ~/.zshrc
 	elif  [ $usedshell = "/bin/bash" ] ||  [ $usedshell = "bash" ]
@@ -119,7 +119,7 @@ list_tags() {
 }
 
 remove_all_tags() {
-  if  [ $usedshell = "/bin/zsh" ] || [ $usedshell == "sh" ]
+  if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 	then
     sed "/tag/d" ~/.zshrc > temp
 		echo "" > ~/.zshrc
@@ -139,7 +139,7 @@ remove_all_tags() {
 }
 
 remove_script() {
-	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ]
+	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 	then
 		rm "$script_dir/$1"
 		al=$(grep $1 ~/.zshrc)
@@ -158,7 +158,7 @@ remove_script() {
 
 remove_alias() {
 	#TODO add a check to see if the alias is already removed
-	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ]
+	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 	then
 		sed "/$1/d" ~/.zshrc > temp
 		echo "" > ~/.zshrc
@@ -181,7 +181,7 @@ remove_all_alias() {
 	read answer
 	if [ $answer = "y" ]
 	then
-    if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ]
+    if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 		then
 			sed "/#alias made by $package/d" ~/.zshrc > temp
 			echo "" > ~/.zshrc
@@ -212,7 +212,7 @@ remove_all_alias() {
 }
 
 restart_shell() {
-	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ]
+	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 	then
 		exec zsh
 	elif  [ $usedshell = "/bin/bash" ] || [ $usedshell = "bash" ]
@@ -225,7 +225,7 @@ restart_shell() {
 
 tag() {
   tagn=$(pwd)
-  if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ]
+  if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 	then
 		if [ $# -eq 0 ]
 		then
@@ -344,7 +344,7 @@ _initialise_package() {
 _change_config() {
 		# Change the settings
 		echo "#!/bin/$usedshell" >> $exp_file
-		if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ]
+		if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 		then
 			shellname="zsh"
 			echo $colr "${green}${package} configuration${reset}"
@@ -459,7 +459,7 @@ _list_rc () {
 
 _remove_memento() {
 	remove_script _mto_memento.sh
-	find $script_dir  -maxdepth 1 -name '_mto_memento.sh' #~/
+	find $script_dir/  -maxdepth 1 -name '_mto_memento.sh' 
 	remove_alias '_mto_memento.sh'
 	echo $colr "${cyan} ${package} is removed${reset}"
 	restart_shell
