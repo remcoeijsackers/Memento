@@ -46,7 +46,7 @@ append_src () {
 		alname=$1
 		alcomm=$2
 		printf "alias %s='%s' #alias made by $package\n" "$alname" "$alcomm" >> ~/.zshrc
-	elif $usedshell = [ "/bin/bash" ] || [ $usedshell = "bash" ]
+	elif [ $usedshell = "/bin/bash" ] || [ $usedshell = "bash" ]
 	then
 		alname=$1
 		alcomm=$2
@@ -88,7 +88,7 @@ list_aliases() {
 	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ]
 	then
 		grep "alias made by $package" ~/.zshrc
-	elif [ $usedshell = "bash" ]
+	elif [ $usedshell = "/bin/bash" ] || [ $usedshell = "bash" ]
 	then
 		grep "alias made by $package" ~/.bashrc 
 	else 
@@ -188,7 +188,7 @@ remove_all_alias() {
 			sed "/alias $1/d" ~/.bashrc > temp
 			echo "" > ~/.bashrc
 			#put the package alias back
-			prinf "alias %s='%s' #alias made by $package\n" "$callsign" "$script_dir/_mto_memento.sh" >> temp
+			printf "alias %s='%s' #alias made by $package\n" "$callsign" "$script_dir/_mto_memento.sh" >> temp
 			cat temp > ~/.bashrc
 			rm temp
 		else 
@@ -235,7 +235,7 @@ tag() {
 		alcomm="cd $tagn"
 		printf "alias %s='%s' #tag made by $package\n" "$alname" "$alcomm" >> ~/.zshrc
     printf "alias %s='%s'\n" "$alname" "$alcomm" 
-	elif  $usedshell = "/bin/bash" ] || [ $usedshell = "bash" ]
+	elif [ $usedshell = "/bin/bash" ] || [ $usedshell = "bash" ]
 	then
 		if [ $# -eq 0 ]
 		then
