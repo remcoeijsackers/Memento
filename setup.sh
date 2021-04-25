@@ -363,30 +363,31 @@ _init_package() {
 		read answer
     if [ $answer = 'y' ]
 		then 
-			printf '%s ' "${cyan}Enter a new name: ${reset}(y/n)"
+			printf '%s ' "${cyan}Enter a new name: ${reset}"
 			read answer
 			echo "callsign='$answer'" >> $exp_file
 			tail -n +10 $filename >> $exp_file
 			make_global memento.sh $answer
+			echo $colr "${green}${package} is initialised. use ${reset}'$answer'${green} to call it.${reset}"
 		else 
 			echo "callsign='mto'" >> $exp_file
 			tail -n +10 $filename >> $exp_file
 			make_global $exp_file mto
+			echo $colr "${green}${package} is initialised. use ${reset}'$callsign'${green} to call it.${reset}"
 		fi
-		echo $colr "${green}${package} is initialised. use ${reset}'$callsign'${cyan} to call it.${reset}"
 		restart_shell
 		exit 0
 }
 
 _change_shell() {
-	printf '%s ' "${cyan}new default shell 1=zsh, 2=bash: ${reset}"
-	read $answer
+	printf '%s ' "${cyan}new default shell: ${reset}"
+	read answer
 	echo "callsign='$answer'" >> memento.sh
-	if [ ${REPLY} = "1" ]
+	if [ $answer = "zsh" ]
 	then
-		chsh -s /bin/zsh
+		chsh -s '/bin/zsh'
 		echo "${green}zsh${reset} is the new default shell"
-	elif [ ${REPLY} = "2" ]
+	elif [ $answer = "bash" ]
 	then
 		chsh -s /bin/bash
 		echo -n $colr "${green}bash${reset} is the new default shell"
