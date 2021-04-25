@@ -2,7 +2,7 @@ initialised_pak=false
 restart_default=false
 script_dir='/usr/local/bin'
 callsign='mto'
-
+default_editor='vim'
 
 
 
@@ -17,7 +17,6 @@ reset=`tput sgr0`
 
 package='Memento'
 usedshell=$(ps -p $$ -ocomm=)
-cshell="~/.$b""rc"
 extention="_mto_"
 filename=`basename "$0"`
 exp_file="memento.sh"
@@ -58,7 +57,7 @@ append_src () {
 
 #make a script globally exc
 make_global() {
-	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ]
+	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ]
 	then
 		#rename script for find function
 		new_scriptname="$extention$1"
@@ -81,7 +80,14 @@ make_global() {
 	else 
 		_list_rc
 	fi
+}
 
+edit_script() {
+	if [ -f "$1" ]; then
+		$default_editor $1
+	else 
+		echo $colr "${red}Script${reset} $1 ${red}not found${reset}"
+	fi
 }
 
 list_aliases() {
@@ -267,6 +273,7 @@ print_help() {
     echo $colr "    Usage: ${package} -a ${green}hello${reset} ${cyan}'echo hello' ${reset}"
     echo $colr "-s|--script, ${green}SCRIPT${reset} ${cyan}NAME${reset} make a script globally excecutable"
     echo $colr "    Usage: ${package} -s ${green}hello.sh${reset} ${cyan}'hello' ${reset}"
+	echo $colr "-es|--edit-script, ${green}SCRIPTFILE${reset} edit a script"
 		echo $colr "-t|--tag, ${green}NAME${reset} create a tag in the current directory"
 		echo $colr "    Usage:${package}-a ${green} projectag (optional)${reset} create a tag in the current directory"
 		echo $colr "-rta|--remove-all-allias, remove all tags"
@@ -297,37 +304,70 @@ _setup_package() {
 		echo $colr "${green}${package} is already configured.${reset}"
 		break
 	else 
-		echo""
+		_start_setup
 	fi
-	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ]
-	then
-		shellname="zsh"
-		echo $colr "${green}${package} configuration${reset}"
-	else
-		shellname=$usedshell
-    echo $colr "${green}${package} configuration${reset}"
-	fi
-	printf '%s ' "${cyan}default shell is:${reset} $shellname. ${cyan}change?${reset} (y/n)"
-	read answer
-	if [ $answer = "n" ] || [ $answer = "N" ]
-	then
-		_init_package
-	elif [ $answer = "y" ] || [ $answer = "Y" ]
-	then
-		_change_shell
-		_init_package
-	else 
-		echo "please answer 'y' or 'n' "
-		exit 0
-	fi
+	
 }
 
 #initialising the package
-_init_package() {
-		echo "#!/bin/$shellname" >> $exp_file
+_start_setup() {
+		echo $colr "${cyan}The default settings are:${reset}"
+		echo $colr "${cyan}default shell is:${reset} $usedshell."
+		echo $colr "${cyan}The default script directory is:${reset} $script_dir"
+		echo $colr "${cyan}Shell restart is:${reset} $restart_default"
+		echo $colr "${cyan}Remove${reset} $filename${cyan} after setup: ${reset}False"
+		echo $colr "${cyan}The default editor is${reset} $default_editor${reset}."
+		echo $colr "${cyan}The default command name for ${reset}${package} ${cyan}is${reset} ${callsign}."
+		printf '%s ' "${cyan}Do you want to change any of these settings? ${reset}(y/n)"
+		read answer
+		if [ $answer = 'y' ]
+		then
+			_change_config
+		else
+			_initialise_package
+		fi
+}
+
+_initialise_package() {
+	echo "#!/bin/$usedshell" >> $exp_file
+	echo "script_dir='$script_dir'" >> $exp_file
+	echo "restart_default=true" >> $exp_file
+	echo "initialised_pak=true" >> $exp_file
+	echo "callsign='mto'" >> $exp_file
+	echo "default_editor=vim" >> $exp_file
+	tail -n +10 $filename >> $exp_file
+    make_global $exp_file mto
+	echo $colr "${green}${package} is initialised. use ${reset}'$callsign'${green} to call it.${reset}"
+	restart_shell
+}
+
+_change_config() {
+		# Change the settings
+		echo "#!/bin/$usedshell" >> $exp_file
+		if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ]
+		then
+			shellname="zsh"
+			echo $colr "${green}${package} configuration${reset}"
+		else
+			shellname=$usedshell
+    		echo $colr "${green}${package} configuration${reset}"
+		fi
+		# Change Shell
+		printf '%s ' "${cyan}default shell is:${reset} $shellname. ${cyan}change?${reset} (y/n)"
+		read answer
+		if [ $answer = "n" ] || [ $answer = "N" ]
+		then
+			echo "#!/bin/$usedshell" >> $exp_file
+		elif [ $answer = "y" ] || [ $answer = "Y" ]
+		then
+			_change_shell
+		else 
+			echo "please answer 'y' or 'n' "
+			exit 0
+		fi
+		# Change script dir
 		printf '%s ' "${cyan}The default script directory is:${reset} $script_dir${cyan}. change? ${reset}(y/n)"
 		read answer
-		#read -p $colr "${cyan}The default script directory is:${reset} $script_dir${cyan}. change? y/n ${reset}`echo $'\n> '`"
 		if [ $answer = 'y' ]
 		then 
 			printf '%s ' "${cyan}Enter a new directory:${reset} make sure it is included in the PATH."
@@ -336,6 +376,7 @@ _init_package() {
 		else
 			echo "script_dir='$script_dir'" >> $exp_file
 		fi
+		# Restart default
 		echo $colr "${cyan}Do you want to restart the shell (exec shell) after each command?${reset}"
 		printf '%s ' "${cyan}this is required for aliases to take direct effect.${reset} (y/n)"
 		read answer
@@ -345,23 +386,37 @@ _init_package() {
 		else 
 			echo "restart_default=false" >> $exp_file
 		fi
-		echo "initialised_pak=true" >> $exp_file
+		
+
+		echo $colr "${cyan}The default editor is${reset} $default_editor${reset}. Change?"
+		printf '%s ' "(y/n)"
+		read answer
+		if [ $answer = 'y' ]; then 
+			printf '%s ' "${cyan}Enter name of the new editor: ${reset}"
+			read answer
+			echo "default_editor=$answer" >> $exp_file
+		else
+			echo "default_editor=vim" >> $exp_file
+		fi
 		# remove the setup.sh contents
 		echo $colr "${cyan}Remove the setup file:${reset}($filename)${cyan}? the package file will be in ${reset}$script_dir/_mto_memento.sh"
 		printf '%s ' "(y/n)"
 		read answer
 		if [ $answer = 'y' ]; then
-			if [ ! -f "$FILE" ]; then
+			if [ ! -f "$filename" ]; then
 				rm $filename
 				echo $colr "${green}file:${reset}$filename${green} is removed. ${reset}"
 			else 
 				echo $colr "${red}File could not be found${reset}"
 			fi
 		fi 
+		# initiliasisation check 
+		echo "initialised_pak=true" >> $exp_file
+		#change command name
 		echo $colr "${cyan}The default command name for ${reset}${package} ${cyan}is${reset} ${callsign}."
 		printf '%s ' "${cyan}change? ${reset}(y/n)"
 		read answer
-    if [ $answer = 'y' ]
+    	if [ $answer = 'y' ]
 		then 
 			printf '%s ' "${cyan}Enter a new name: ${reset}"
 			read answer
@@ -382,7 +437,6 @@ _init_package() {
 _change_shell() {
 	printf '%s ' "${cyan}new default shell: ${reset}"
 	read answer
-	echo "callsign='$answer'" >> memento.sh
 	if [ $answer = "zsh" ]
 	then
 		chsh -s '/bin/zsh'
@@ -464,6 +518,16 @@ while test $# -gt 0; do
         exit 1
       fi
       shift 
+      shift 
+      ;;
+    -es|--edit-script)
+      shift
+	  if test $# -gt 0; then
+      	edit_script $1
+	  else 
+	  	echo $colr "${red}No script specified${reset}"
+	  	exit 1
+	  fi
       shift 
       ;;
     -ra|--remove-alias)
