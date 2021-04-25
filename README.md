@@ -35,9 +35,13 @@ mto -rta
 ```
 
 ### Scripts
-*move script to scripts and make it excecutable*
+*Move script to scripts and make it excecutable*
 ```shell
 mto -s scriptfile.sh scriptname
+```
+*Edit script*
+```shell
+mto -es scriptfile
 ```
 *Remove script*
 ```shell
