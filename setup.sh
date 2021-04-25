@@ -420,7 +420,7 @@ if [[ $# -eq 0 ]] ; then
 			if [ $answer = 'y' ]
 				then 
 					chmod +x setup.sh 
-					setup_package
+					_setup_package
 					exit 0
 				else
 					exit 0
@@ -532,7 +532,7 @@ while test $# -gt 0; do
 		*)
 			if [ $initialised_pak = false ]
 			then 
-				printf '%s ' "${package}${cyan}is not yet initialised, want to do that now?${reset}(y/n)"
+				printf '%s ' "${package}${cyan} is not yet initialised, want to do that now?${reset}(y/n)"
 				read answer
 				if [ $answer = 'y' ]
 				then 
