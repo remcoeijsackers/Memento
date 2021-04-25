@@ -83,8 +83,8 @@ make_global() {
 }
 
 edit_script() {
-	if [ -f "$1" ]; then
-		$default_editor $1
+	if [ -f "$script_dir/$1" ]; then
+		$default_editor $script_dir/$1
 	else 
 		echo $colr "${red}Script${reset} $1 ${red}not found${reset}"
 	fi
