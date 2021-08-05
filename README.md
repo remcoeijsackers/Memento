@@ -7,6 +7,7 @@ handles tags, aliases, scripts
 ```shell
 chmod +x setup.sh && ./setup.sh
 ```
+Note: The script uses its the same code (for setting up other scripts) to set itself up, 'setup.sh' will create and move the neccesary files. 
 
 ## Usage
 
