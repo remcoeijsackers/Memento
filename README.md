@@ -51,7 +51,7 @@ mto -rta
 ```
 
 ### Scripts
-*Move script to scripts and make it excecutable*
+*Move script to scripts directory (can be changed in setup), put it in your shells .rc file, and make it excecutable*
 ```shell
 mto -s scriptfile.sh scriptname
 ```
@@ -70,6 +70,7 @@ mto -es mto_memento.sh
 mto -rs scriptfile
 ```
 
+
 ### Aliases
 *Create alias*
 ```shell
@@ -79,6 +80,11 @@ mto -a aliasname 'alias command'
 ```shell
 mto -ra aliasname
 ```
+*Remove all alisases*
+```shell
+mto -rma
+```
+### Uninstall
 *Remove Memento*
 ```shell
 mto -rmto
