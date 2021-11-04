@@ -60,7 +60,7 @@ mto -s scriptfile.sh scriptname
 mto -es scriptfile
 ```
 
-**Note: if you want to change some functionality within memento itself, you can use this memento edit it;
+**Note:** if you want to change some functionality within memento itself, you can use this memento edit it;
 ```shell
 mto -es mto_memento.sh
 ```
