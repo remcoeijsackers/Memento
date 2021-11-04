@@ -7,7 +7,8 @@ default_editor='vim'
 
 
 
-#'''======Change code only below this point======='''
+#'''Change code only below this point============'''
+#'''The first 10 lines are checked during setup=='''
 # MEMENTO
 
 red=`tput setaf 1`
