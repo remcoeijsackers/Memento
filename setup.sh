@@ -39,6 +39,20 @@ else
 	read_assist="-p"
 fi
 
+# option to toggle a demo mode when setting up the program, for debugging.
+if $initialised_pak
+then
+	demo_mode=false
+else
+    case $1 in
+            "demo") demo_mode=true;;
+			"") demo_mode=false;;
+			*) echo "Unknown config option"
+				exit 0;;
+        esac
+fi
+	
+
 #make an alias
 append_src () {
 	if [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
@@ -325,7 +339,13 @@ _start_setup() {
 		then
 			_change_config
 		else
-			_initialise_package
+			if [ $demo_mode ]
+			then
+				echo "demo mode"
+				
+			else
+				_initialise_package
+			fi
 		fi
 }
 
@@ -342,18 +362,8 @@ _initialise_package() {
 	restart_shell
 }
 
-_change_config() {
-		# Change the settings
-		echo "#!/bin/$usedshell" >> $exp_file
-		if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
-		then
-			shellname="zsh"
-			echo $colr "${green}${package} configuration${reset}"
-		else
-			shellname=$usedshell
-    		echo $colr "${green}${package} configuration${reset}"
-		fi
-		# Change Shell
+
+_change_config_shell() {
 		printf '%s ' "${cyan}default shell is:${reset} $shellname. ${cyan}change?${reset} (y/n)"
 		read answer
 		if [ $answer = "n" ] || [ $answer = "N" ]
@@ -366,7 +376,9 @@ _change_config() {
 			echo "please answer 'y' or 'n' "
 			exit 0
 		fi
-		# Change script dir
+}
+
+_change_config_script_dir() {
 		printf '%s ' "${cyan}The default script directory is:${reset} $script_dir${cyan}. change? ${reset}(y/n)"
 		read answer
 		if [ $answer = 'y' ]
@@ -377,7 +389,9 @@ _change_config() {
 		else
 			echo "script_dir='$script_dir'" >> $exp_file
 		fi
-		# Restart default
+}
+
+_change_config_restart_default() {
 		echo $colr "${cyan}Do you want to restart the shell (exec shell) after each command?${reset}"
 		printf '%s ' "${cyan}this is required for aliases to take direct effect.${reset} (y/n)"
 		read answer
@@ -387,8 +401,9 @@ _change_config() {
 		else 
 			echo "restart_default=false" >> $exp_file
 		fi
-		
+}
 
+_change_config_default_editor() {
 		echo $colr "${cyan}The default editor is${reset} $default_editor${reset}. Change?"
 		printf '%s ' "(y/n)"
 		read answer
@@ -399,7 +414,26 @@ _change_config() {
 		else
 			echo "default_editor=vim" >> $exp_file
 		fi
-		# remove the setup.sh contents
+}
+
+_change_config_command_name() {
+	echo $colr "${cyan}The default command name for ${reset}${package} ${cyan}is${reset} ${callsign}."
+	printf '%s ' "${cyan}change? ${reset}(y/n)"
+
+	read answer
+    if [ $answer = 'y' ]
+	then 
+		printf '%s ' "${cyan}Enter a new name: ${reset}"
+		read command_name
+		echo "callsign='$command_name'" >> $exp_file
+		
+	else 
+		echo "callsign='mto'" >> $exp_file
+	fi
+
+}
+
+_change_config_remove_setup_file(){
 		echo $colr "${cyan}Remove the setup file:${reset}($filename)${cyan}? the package file will be in ${reset}$script_dir/_mto_memento.sh"
 		printf '%s ' "(y/n)"
 		read answer
@@ -411,29 +445,8 @@ _change_config() {
 				echo $colr "${red}File could not be found${reset}"
 			fi
 		fi 
-		# initiliasisation check 
-		echo "initialised_pak=true" >> $exp_file
-		#change command name
-		echo $colr "${cyan}The default command name for ${reset}${package} ${cyan}is${reset} ${callsign}."
-		printf '%s ' "${cyan}change? ${reset}(y/n)"
-		read answer
-    	if [ $answer = 'y' ]
-		then 
-			printf '%s ' "${cyan}Enter a new name: ${reset}"
-			read answer
-			echo "callsign='$answer'" >> $exp_file
-			tail -n +10 $filename >> $exp_file
-			make_global memento.sh $answer
-			echo $colr "${green}${package} is initialised. use ${reset}'$answer'${green} to call it.${reset}"
-		else 
-			echo "callsign='mto'" >> $exp_file
-			tail -n +10 $filename >> $exp_file
-			make_global $exp_file mto
-			echo $colr "${green}${package} is initialised. use ${reset}'$callsign'${green} to call it.${reset}"
-		fi
-		restart_shell
-		exit 0
 }
+
 
 _change_shell() {
 	printf '%s ' "${cyan}new default shell: ${reset}"
@@ -450,6 +463,69 @@ _change_shell() {
 		echo $colr "${red}shell not supported, supported shells are: bash, zsh ${reset}"
 	fi
 }
+
+_change_config() {
+		# Change the settings
+		echo "#!/bin/$usedshell" >> $exp_file
+		if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
+		then
+			shellname="zsh"
+			echo $colr "${green}${package} configuration${reset}"
+		else
+			shellname=$usedshell
+    		echo $colr "${green}${package} configuration${reset}"
+		fi
+		# Change Shell
+		_change_config_shell
+
+		# Change script dir
+		_change_config_script_dir
+
+		# Restart default
+		_change_config_restart_default
+
+		#Change Default editor
+		_change_config_default_editor
+		
+		# remove the setup.sh contents
+		if [ $demo_mode ]
+		then 
+			echo "demo mode"
+		else
+			_change_config_remove_setup_file
+		fi
+
+		# initiliasisation check 
+		echo "initialised_pak=true" >> $exp_file
+
+		#change command name
+
+		_change_config_command_name
+
+		cmname=$(grep 'callsign' $exp_file)
+		cmd_name=$(cut -d "=" -f2 <<< "$cmname" | sed 's/^.//;s/.$//')
+
+		#Add the script contents to the file
+
+		tail -n +10 $filename >> $exp_file
+
+		echo $cmd_name
+
+		exit 0
+		if [ $demo_mode ]
+		then 
+			echo "demo mode: would move file otherwise"
+		else
+			make_global $exp_file $cmd_name
+			echo $colr "${green}${package} is initialised. use ${reset}'$cmd_name'${green} to call it.${reset}"
+			
+			# Ending setup
+			restart_shell
+			exit 0
+		fi
+}
+
+
 
 _list_rc () {
 		echo "shellrc file not found. current shell: $usedshell"
@@ -475,7 +551,7 @@ if [[ $# -eq 0 ]] ; then
 			read answer
 			if [ $answer = 'y' ]
 				then 
-					chmod +x setup.sh 
+					chmod +x $filename
 					_setup_package
 					exit 0
 				else
