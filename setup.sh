@@ -1,3 +1,4 @@
+#!/bin/sh
 initialised_pak=false
 restart_default=false
 script_dir='/usr/local/bin'
@@ -47,8 +48,8 @@ else
     case $1 in
             "demo") demo_mode=true;;
 			"") demo_mode=false;;
-			*) echo "Unknown config option"
-				exit 0;;
+			#*) echo "Unknown config option"
+			#	exit 0;;
         esac
 fi
 	
@@ -339,7 +340,7 @@ _start_setup() {
 		then
 			_change_config
 		else
-			if [ $demo_mode ]
+			if $demo_mode
 			then
 				echo "demo mode"
 				
@@ -488,7 +489,7 @@ _change_config() {
 		_change_config_default_editor
 		
 		# remove the setup.sh contents
-		if [ $demo_mode ]
+		if $demo_mode
 		then 
 			echo "demo mode"
 		else
@@ -509,10 +510,7 @@ _change_config() {
 
 		tail -n +10 $filename >> $exp_file
 
-		echo $cmd_name
-
-		exit 0
-		if [ $demo_mode ]
+		if $demo_mode
 		then 
 			echo "demo mode: would move file otherwise"
 		else
@@ -542,6 +540,83 @@ _remove_memento() {
 	restart_shell
 }
 
+function select_option {
+    ESC=$( printf "\033")
+    cursor_blink_on()  { printf "$ESC[?25h"; }
+    cursor_blink_off() { printf "$ESC[?25l"; }
+    cursor_to()        { printf "$ESC[$1;${2:-1}H"; }
+    print_option()     { printf "   $1 "; }
+    print_selected()   { printf "  $ESC[7m $1 $ESC[27m"; }
+    get_cursor_row()   { IFS=';' read -sdR -p $'\E[6n' ROW COL; echo ${ROW#*[}; }
+    key_input()        { read -s -n3 key 2>/dev/null >&2
+                         if [[ $key = $ESC[A ]]; then echo up;    fi
+                         if [[ $key = $ESC[B ]]; then echo down;  fi
+                         if [[ $key = ""     ]]; then echo enter; fi; }
+
+    # initially print empty new lines (scroll down if at bottom of screen)
+    for opt; do printf "\n"; done
+
+    # determine current screen position for overwriting the options
+    local lastrow=`get_cursor_row`
+    local startrow=$(($lastrow - $#))
+
+    # ensure cursor and input echoing back on upon a ctrl+c during read -s
+    trap "cursor_blink_on; stty echo; printf '\n'; exit" 2
+    cursor_blink_off
+
+    local selected=0
+    while true; do
+        # print options by overwriting the last lines
+        local idx=0
+        for opt; do
+            cursor_to $(($startrow + $idx))
+            if [ $idx -eq $selected ]; then
+                print_selected "$opt"
+            else
+                print_option "$opt"
+            fi
+            ((idx++))
+        done
+
+        # user key control
+        case `key_input` in
+            enter) break;;
+            up)    ((selected--));
+                   if [ $selected -lt 0 ]; then selected=$(($# - 1)); fi;;
+            down)  ((selected++));
+                   if [ $selected -ge $# ]; then selected=0; fi;;
+        esac
+    done
+
+    # cursor position back to normal
+    cursor_to $lastrow
+    printf "\n"
+    cursor_blink_on
+
+    return $selected
+}
+
+
+list_tags_interactively() {
+	file_path=~/.zshrc  # Replace with the path to your file
+
+	# Read the file contents into an array
+	array=()
+	while IFS= read -r line || [ -n "$line" ]; do
+	    if [ "${line#alias}" != "$line" ]; then
+	        alias_name=$(echo "$line" | awk '{print $2}')
+	        array+=("$alias_name")
+	    fi
+	done < "$file_path"
+	select_option "${array[@]}"
+	choice=$?
+
+	echo "Chosen index = $choice"
+	echo "        value = ${options[$choice]}"
+
+}
+
+
 #first run from the setup script
 if [[ $# -eq 0 ]] ; then
     if [ $initialised_pak = false ]
@@ -562,10 +637,19 @@ if [[ $# -eq 0 ]] ; then
 			break
 		fi
     exit 0
+else
+	if $demo_mode
+		then 
+			echo
+	fi
 fi
 
 while test $# -gt 0; do
   case "$1" in
+	-o)
+	list_tags_interactively
+	exit 1;;
+
     -h|--help)
 			print_help
       ;;
