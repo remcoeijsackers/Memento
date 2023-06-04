@@ -23,6 +23,7 @@ extention="_mto_"
 filename=`basename "$0"`
 exp_file="memento.sh"
 TEMPFILE='_mto_cnt.tmp'
+demo_mode=false
 
 #for tagging without input, a counter file is used.
 if [ ! -f '_mto_cnt.tmp' ]; then
@@ -41,17 +42,26 @@ else
 fi
 
 # option to toggle a demo mode when setting up the program, for debugging.
-if $initialised_pak
-then
-	demo_mode=false
+#if $initialised_pak
+#then
+#	demo_mode=false
+#else
+#    case $1 in
+#            "demo") demo_mode=true;;
+#			"") demo_mode=false;;
+#			"-ia") demo_mode=false;;
+#			"-ia demo") demo_mode=true;;
+#			#	exit 0;;
+#        esac
+#fi
+
+if [ $1 = "-ia" ]
+then 
+	interactive_mode=true
 else
-    case $1 in
-            "demo") demo_mode=true;;
-			"") demo_mode=false;;
-			#*) echo "Unknown config option"
-			#	exit 0;;
-        esac
+	interactive_mode=false
 fi
+
 	
 
 #make an alias
@@ -279,27 +289,45 @@ tag() {
 }
 
 print_help() {
-    echo " "
-    echo $colr "${cyan}$package${cyan} [options] [arguments]"
-		echo "- handles tags, aliases, scripts"
-    echo " "
-    echo "options:"
-    echo "-h, --help                show brief help"
-    echo $colr "-a|--alias, ${green}ALIAS${reset} ${cyan}COMMAND${reset}       make a new alias"
-    echo $colr "    Usage: ${package} -a ${green}hello${reset} ${cyan}'echo hello' ${reset}"
-    echo $colr "-s|--script, ${green}SCRIPT${reset} ${cyan}NAME${reset} make a script globally excecutable"
-    echo $colr "    Usage: ${package} -s ${green}hello.sh${reset} ${cyan}'hello' ${reset}"
-	echo $colr "-es|--edit-script, ${green}SCRIPTFILE${reset} edit a script"
-		echo $colr "-t|--tag, ${green}NAME${reset} create a tag in the current directory"
-		echo $colr "    Usage:${package}-a ${green} projectag (optional)${reset} create a tag in the current directory"
-		echo $colr "-rta|--remove-all-allias, remove all tags"
-    echo $colr "-ra|--remove-alias, ${green}ALIAS${reset} remove a alias"
-		echo $colr "-rma|--remove-alias, remove all aliases"
-    echo $colr "-rs|--remove-script, ${green}SCRIPT${reset} remove a script"
-    echo $colr "-ls|--list,  list scripts and aliases"
-		echo $colr "-e|--exec,  restart the shell"
-		echo $colr "-i|--init,  configure ${package}"
-    exit 0
+	# Colors
+	cyan=$(tput setaf 6)
+	green=$(tput setaf 2)
+	reset=$(tput sgr0)
+	red=$(tput setaf 1)
+
+	# Function to print a row in the table
+	print_row() {
+	  printf "| %-40s | %-60s \n" "$1" "$2"
+	}
+
+	# Function to print the help message
+
+	phelp() {
+	  printf "\n"
+	  printf "%s\n" "$cyan$package$cyan [options] [arguments]"
+	  printf "%s\n" "- handles tags, aliases, scripts"
+	  printf "\n"
+	  printf "options:\n"
+	  print_row "-h, --help" "show brief help"
+	  print_row "-a|--alias, $green<ALIAS>$reset $cyan<COMMAND>$reset" "make a new alias"
+	  print_row "" "${red}Usage: $callsign -a $greenhello$reset $cyan'echo hello'$reset"
+	  print_row "-s|--script, $green<SCRIPT>$reset $cyan<NAME>$reset" "make a script globally executable"
+	  print_row "" "${red}Usage: $callsign -s $greenhello.sh$reset $cyan'hello'$reset"
+	  print_row "-es|--edit-script, $green<FILE>$reset" "edit a script"
+	  print_row "-t|--tag, $green<NAME>$reset" "create a tag in the current directory"
+	  print_row "" "${red}Usage: $callsign -a $greenprojectag (optional)$reset" "create a tag in the current directory"
+	  print_row "-rta|--remove-all-alias" "remove all aliases"
+	  print_row "-ra|--remove-alias, $green<ALIAS>$reset" "remove an alias"
+	  print_row "-rma|--remove-all-aliases" "remove all aliases"
+	  print_row "-rs|--remove-script, $green<SCRIPT>$reset" "remove a script"
+	  print_row "-ls|--list" "list scripts and aliases"
+	  print_row "-e|--exec" "restart the shell"
+	  print_row "-i|--init" "configure $callsign"
+	  print_row "-ia" "interactive mode"
+	  printf "\n"
+	  exit 0
+	}
+	phelp
 }
 
 # random script generator, to be used for tests
@@ -327,14 +355,28 @@ _setup_package() {
 
 #initialising the package
 _start_setup() {
-		echo $colr "${cyan}The default settings are:${reset}"
-		echo $colr "${cyan}default shell is:${reset} $usedshell."
-		echo $colr "${cyan}The default script directory is:${reset} $script_dir"
-		echo $colr "${cyan}Shell restart is:${reset} $restart_default"
-		echo $colr "${cyan}Remove${reset} $filename${cyan} after setup: ${reset}False"
-		echo $colr "${cyan}The default editor is${reset} $default_editor${reset}."
-		echo $colr "${cyan}The default command name for ${reset}${package} ${cyan}is${reset} ${callsign}."
-		printf '%s ' "${cyan}Do you want to change any of these settings? ${reset}(y/n)"
+		print_row() {
+		  printf "| %-30s | %-40s \n" "$1" "$2"
+		}
+
+		print_settings() {
+		# Print the settings in a table
+		  printf "\n"
+		  echo "${cyan}The default settings:${reset}"
+		  printf "\n"
+  		  print_row "${cyan}default shell is:${reset}        			" "$usedshell"
+  		  print_row "${cyan}Script directory:${reset}        			" "$script_dir"
+  		  print_row "${cyan}Shell restart is:${reset}		 		" "$restart_default"
+  		  print_row "${cyan}Remove${reset} $filename${cyan} after setup:${reset}			" "False"
+  		  print_row "${cyan}The editor is${reset}				    	" "$default_editor${reset}."
+  		  print_row "${cyan}The command name for ${reset}${package} ${cyan}is${reset}		" "$callsign"
+  		  printf "\n"
+  		  echo "${cyan}Do you want to change any of these settings? ${reset}" ""
+		  echo "(y/n)"
+		}
+
+		print_settings
+
 		read answer
 		if [ $answer = 'y' ]
 		then
@@ -365,87 +407,142 @@ _initialise_package() {
 
 
 _change_config_shell() {
-		printf '%s ' "${cyan}default shell is:${reset} $shellname. ${cyan}change?${reset} (y/n)"
-		read answer
-		if [ $answer = "n" ] || [ $answer = "N" ]
-		then
+		__manual_config() {
+			printf '%s ' "${cyan}default shell is:${reset} $shellname. ${cyan}change?${reset} (y/n)"
+			read answer
+			if [ $answer = "n" ] || [ $answer = "N" ]
+			then
+				echo "#!/bin/$usedshell" >> $exp_file
+			elif [ $answer = "y" ] || [ $answer = "Y" ]
+			then
+				_change_shell
+			else 
+				echo "please answer 'y' or 'n' "
+				exit 0
+			fi
+		}
+	  	arg1="$1"
+  		if [ -z "$arg1" ]; then
+  		  arg1=""
+		  __manual_config
+		else
 			echo "#!/bin/$usedshell" >> $exp_file
-		elif [ $answer = "y" ] || [ $answer = "Y" ]
-		then
-			_change_shell
-		else 
-			echo "please answer 'y' or 'n' "
-			exit 0
-		fi
+  		fi
+
 }
 
 _change_config_script_dir() {
-		printf '%s ' "${cyan}The default script directory is:${reset} $script_dir${cyan}. change? ${reset}(y/n)"
-		read answer
-		if [ $answer = 'y' ]
-		then 
-			printf '%s ' "${cyan}Enter a new directory:${reset} make sure it is included in the PATH."
+		__manual_config() {
+			printf '%s ' "${cyan}The default script directory is:${reset} $script_dir${cyan}. change? ${reset}(y/n)"
 			read answer
-			echo "script_dir='$answer'" >> $exp_file
+			if [ $answer = 'y' ]
+			then 
+				printf '%s ' "${cyan}Enter a new directory:${reset} make sure it is included in the PATH."
+				read answer
+				echo "script_dir='$answer'" >> $exp_file
+			else
+				echo "script_dir='$script_dir'" >> $exp_file
+			fi
+		}
+		arg1="$1"
+	  	if [ -z "$arg1" ]; then
+  		  	arg1=""
+		  	__manual_config
 		else
 			echo "script_dir='$script_dir'" >> $exp_file
-		fi
+  		fi
 }
 
 _change_config_restart_default() {
-		echo $colr "${cyan}Do you want to restart the shell (exec shell) after each command?${reset}"
-		printf '%s ' "${cyan}this is required for aliases to take direct effect.${reset} (y/n)"
-		read answer
-		if [ $answer = 'y' ]
-		then
-			echo "restart_default=true" >> $exp_file
-		else 
+		__manual_config() {
+			echo $colr "${cyan}Do you want to restart the shell (exec shell) after each command?${reset}"
+			printf '%s ' "${cyan}this is required for aliases to take direct effect.${reset} (y/n)"
+			read answer
+			if [ $answer = 'y' ]
+			then
+				echo "restart_default=true" >> $exp_file
+			else 
+				echo "restart_default=false" >> $exp_file
+			fi
+		}
+		arg1="$1"
+		if [ -z "$arg1" ]; then
+  		  	arg1=""
+		  	__manual_config
+		else
 			echo "restart_default=false" >> $exp_file
-		fi
+  		fi
 }
 
 _change_config_default_editor() {
-		echo $colr "${cyan}The default editor is${reset} $default_editor${reset}. Change?"
-		printf '%s ' "(y/n)"
-		read answer
-		if [ $answer = 'y' ]; then 
-			printf '%s ' "${cyan}Enter name of the new editor: ${reset}"
+		__manual_config() {
+			echo $colr "${cyan}The default editor is${reset} $default_editor${reset}. Change?"
+			printf '%s ' "(y/n)"
 			read answer
-			echo "default_editor=$answer" >> $exp_file
+			if [ $answer = 'y' ]; then 
+				printf '%s ' "${cyan}Enter name of the new editor: ${reset}"
+				read answer
+				echo "default_editor=$answer" >> $exp_file
+			else
+				echo "default_editor=vim" >> $exp_file
+			fi
+		}
+		arg1="$1"
+		if [ -z "$arg1" ]; then
+  		  	arg1=""
+		  	__manual_config
 		else
 			echo "default_editor=vim" >> $exp_file
-		fi
+  		fi
+
 }
 
 _change_config_command_name() {
-	echo $colr "${cyan}The default command name for ${reset}${package} ${cyan}is${reset} ${callsign}."
-	printf '%s ' "${cyan}change? ${reset}(y/n)"
+		__manual_config() {
+			echo $colr "${cyan}The default command name for ${reset}${package} ${cyan}is${reset} ${callsign}."
+			printf '%s ' "${cyan}change? ${reset}(y/n)"
 
-	read answer
-    if [ $answer = 'y' ]
-	then 
-		printf '%s ' "${cyan}Enter a new name: ${reset}"
-		read command_name
-		echo "callsign='$command_name'" >> $exp_file
-		
-	else 
-		echo "callsign='mto'" >> $exp_file
-	fi
+			read answer
+    		if [ $answer = 'y' ]
+			then 
+				printf '%s ' "${cyan}Enter a new name: ${reset}"
+				read command_name
+				echo "callsign='$command_name'" >> $exp_file
 
+			else 
+				echo "callsign='mto'" >> $exp_file
+			fi
+		}
+		arg1="$1"
+		if [ -z "$arg1" ]; then
+  		  	arg1=""
+		  	__manual_config
+		else
+			echo "callsign='mto'" >> $exp_file
+  		fi
 }
 
 _change_config_remove_setup_file(){
-		echo $colr "${cyan}Remove the setup file:${reset}($filename)${cyan}? the package file will be in ${reset}$script_dir/_mto_memento.sh"
-		printf '%s ' "(y/n)"
-		read answer
-		if [ $answer = 'y' ]; then
-			if [ ! -f "$filename" ]; then
-				rm $filename
-				echo $colr "${green}file:${reset}$filename${green} is removed. ${reset}"
-			else 
-				echo $colr "${red}File could not be found${reset}"
-			fi
-		fi 
+		__manual_config() {
+			echo $colr "${cyan}Remove the setup file:${reset}($filename)${cyan}? the package file will be in ${reset}$script_dir/_mto_memento.sh"
+			printf '%s ' "(y/n)"
+			read answer
+			if [ $answer = 'y' ]; then
+				if [ ! -f "$filename" ]; then
+					rm $filename
+					echo $colr "${green}file:${reset}$filename${green} is removed. ${reset}"
+				else 
+					echo $colr "${red}File could not be found${reset}"
+				fi
+			fi 
+		}
+		arg1="$1"
+		if [ -z "$arg1" ]; then
+  		  	arg1=""
+		  	__manual_config
+		else
+			echo ""
+  		fi
 }
 
 
@@ -476,25 +573,114 @@ _change_config() {
 			shellname=$usedshell
     		echo $colr "${green}${package} configuration${reset}"
 		fi
+		config_options=( "shell" "script_dir" "restart" "editor" "setup_file" "done" )
+
+		configured_parts=("done")
+
+		while true; do
+			echo $colr "${cyan}${package} Configuration ${reset}" 
+			echo $colr "${red}Configured: ${configured_parts[@]} ${reset}" 
+			select_option "${config_options[@]}"
+			choice=$?
+
+			val=${config_options[$choice]}
+
+			case "$val" in
+            	"done") 
+					echo "im done"
+					break
+					;;
+            	"shell")
+            	    _change_config_shell
+					configured_parts+="shell"
+					;;
+            	"script_dir")
+            	    _change_config_script_dir
+					configured_parts+="script_dir"
+					;;
+            	"restart")
+            	    _change_config_restart_default
+					configured_parts+="restart"
+					;;
+            	"editor")
+            	    _change_config_default_editor
+					configured_parts+="editor"
+					;;
+            	"setup_file")
+            	    _change_config_remove_setup_file
+					configured_parts+="setup_file"
+					;;
+        	esac
+		done
+
+		A=${config_options[@]};
+		B=${configured_parts[@]};
+		unconfigured_remainder=(`echo ${A[@]} ${B[@]} | tr ' ' '\n' | sort | uniq -u `)
+
+		autofill_default_config() {
+			autofilled_options=()
+			echo "unconfigured before handling: ${unconfigured_remainder[@]}"
+			for i in "${unconfigured_remainder[@]}"
+			do
+			   	case "$i" in
+            	"done") 
+					
+					;;
+            	"shell")
+					echo "shell unconfigured"
+            	    _change_config_shell  "default"
+					autofilled_options+="shell"
+					;;
+            	"script_dir")
+            	    _change_config_script_dir "default"
+					autofilled_options+="script_dir"
+					;;
+            	"restart")
+            	    _change_config_restart_default "default"
+					autofilled_options+="restart"
+					;;
+            	"editor")
+            	    _change_config_default_editor "default"
+					autofilled_options+="editor"
+					;;
+            	"setup_file")
+            	    _change_config_remove_setup_file "default"
+					autofilled_options+="setup_file"
+					;;
+        		esac
+			   
+			done
+			echo "outfilled options: $autofilled_options"
+
+		}
+
+
+		if [ "$A" == "$B" ] ; then
+		    echo "All configuration done." ;
+		else
+			echo "Not all parts are configured. $unconfigured_remainder \n The default will be used" ;
+			autofill_default_config ;
+		fi;
+
 		# Change Shell
-		_change_config_shell
+		#_change_config_shell
 
 		# Change script dir
-		_change_config_script_dir
+		#_change_config_script_dir
 
 		# Restart default
-		_change_config_restart_default
+		#_change_config_restart_default
 
 		#Change Default editor
-		_change_config_default_editor
+		#_change_config_default_editor
 		
 		# remove the setup.sh contents
-		if $demo_mode
-		then 
-			echo "demo mode"
-		else
-			_change_config_remove_setup_file
-		fi
+		#if $demo_mode
+		#then 
+		#	echo "demo mode"
+		#else
+		#	_change_config_remove_setup_file
+		#fi
 
 		# initiliasisation check 
 		echo "initialised_pak=true" >> $exp_file
@@ -603,19 +789,227 @@ list_tags_interactively() {
 	# Read the file contents into an array
 	array=()
 	while IFS= read -r line || [ -n "$line" ]; do
-	    if [ "${line#alias}" != "$line" ]; then
-	        alias_name=$(echo "$line" | awk '{print $2}')
-	        array+=("$alias_name")
+	    if [ "${line%#tag made by Memento}" != "$line" ]; then
+	        alias_line=$(echo "$line" | sed -E "s/alias ([^=]+)='([^']+)' #tag made by Memento/\1='\2'/")
+	        array+=("$alias_line")
 	    fi
 	done < "$file_path"
+
+	echo $colr "${cyan}${package} Tags ${reset}" 
 	select_option "${array[@]}"
 	choice=$?
 
+	val=${array[$choice]}
+
 	echo "Chosen index = $choice"
-	echo "        value = ${options[$choice]}"
+	echo "        value = $val"
 
 }
 
+
+# new menu
+
+# Define menu options with corresponding values
+options=("Help" "Option 2" "Submenu 1" "Install" "Exit")
+values=("value1" "value2" "submenu1" "install" "exit")
+
+# Define submenu options with corresponding values
+submenu=("Suboption 1" "Suboption 2" "Back")
+submenu_values=("subvalue1" "subvalue2" "back")
+
+# Set initial cursor position
+cursor=0
+
+# Define color codes
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Array to store selected options
+selected_options=()
+
+if $demo_mode
+then 
+	demo_mode_text="demo"
+else
+	demo_mode_text=""
+fi
+
+# Function to display the menu
+display_menu() {
+  clear
+  echo "${BLUE}*********************************************"
+  echo "                 Memento $demo_mode_text"
+  echo "*********************************************${NC}"
+
+  for ((i=0; i<${#options[@]}; i++)); do
+    if [ $i -eq $cursor ]; then
+      echo "${YELLOW} ► ${options[$i]}${NC}"
+    else
+      echo "   ${options[$i]}"
+    fi
+  done
+}
+
+# Function to display submenu
+display_submenu() {
+  clear
+  echo "${BLUE}*********************************************"
+  echo "                Memento - "
+  echo "*********************************************${NC}"
+
+  for ((i=0; i<${#submenu[@]}; i++)); do
+    if [ $i -eq $cursor ]; then
+      echo "${YELLOW} ► ${submenu[$i]}${NC}"
+    else
+      echo "   ${submenu[$i]}"
+    fi
+  done
+}
+
+# Function to process selected option
+process_option() {
+  selected_option=$1
+  echo "Processing option: $selected_option"
+
+  # Example: Call another function based on the selected option
+  case "$selected_option" in
+    "Help")
+      echo "${GREEN}Calling function for Option 1${NC}"
+	  print_help
+      # Call your function for Option 1 here
+      ;;
+    "Option 2")
+      echo "${GREEN}Calling function for Option 2${NC}"
+      # Call your function for Option 2 here
+      ;;
+    "Suboption 1")
+      echo "${GREEN}Calling function for Suboption 1${NC}"
+      # Call your function for Suboption 1 here
+      ;;
+    "Suboption 2")
+      echo "${GREEN}Calling function for Suboption 2${NC}"
+      # Call your function for Suboption 2 here
+      ;;
+	"Install")
+		if $initialised_pak 
+		then
+      		echo "${red}Already installed.${NC}"
+			break
+		else
+			echo "${green}Starting setup.${NC}"
+			_setup_package
+			break
+		fi
+      ;;
+	"Exit")
+		exit 0;;
+	*)
+	echo "Unkown option"
+	exit 0
+  esac
+
+  # Store selected option-value pair in the array
+  selected_options+=("$selected_option:${values[$cursor]}")
+  exit 0
+}
+
+# Main menu loop
+while $interactive_mode; do
+  display_menu
+
+  # Read user input
+  read -rsn1 key
+
+  case "$key" in
+    A) # Up arrow
+      if [ $cursor -gt 0 ]; then
+        cursor=$((cursor - 1))
+      fi
+      ;;
+    B) # Down arrow
+      if [ $cursor -lt $(( ${#options[@]} - 1 )) ]; then
+        cursor=$((cursor + 1))
+      fi
+      ;;
+    "") # Enter key
+      case "$cursor" in
+        0) # Help
+          selected_option="${options[$cursor]}"
+          process_option "$selected_option"
+          ;;
+        1) # Option 2
+          selected_option="${options[$cursor]}"
+          process_option "$selected_option"
+          ;;
+        2) # Submenu 1
+          while true; do
+            display_submenu
+
+            # Read user input
+            read -rsn1 key
+
+            case "$key" in
+              A) # Up arrow
+                if [ $cursor -gt 0 ]; then
+                  cursor=$((cursor - 1))
+                fi
+                ;;
+              B) # Down arrow
+                if [ $cursor -lt $(( ${#submenu[@]} - 1 )) ]; then
+                  cursor=$((cursor + 1))
+                fi
+                ;;
+              "") # Enter key
+                case "$cursor" in
+                  0) # Suboption 1
+                    selected_option="${submenu[$cursor]}"
+                    process_option "$selected_option"
+                    ;;
+                  1) # Suboption 2
+                    selected_option="${submenu[$cursor]}"
+                    process_option "$selected_option"
+                    ;;
+                  2) # Back
+                    break
+                    ;;
+                esac
+                ;;
+            esac
+          done
+          ;;
+        3) # Install
+          echo "${RED}Install${NC}"
+          selected_option="${options[$cursor]}"
+          process_option "$selected_option"
+          ;;
+        4) # Exit
+          echo "${RED}Exiting${NC}"
+          exit 0
+          ;;
+        *) # Invalid selection
+          ;;
+      esac
+      ;;
+  esac
+
+  # Exit if a root-level option is selected
+  if [ "$cursor" -ge "${#options[@]}" ]; then
+    echo "${RED}Exiting...${NC}"
+    exit 0
+  fi
+done
+
+# Print out the selected options
+echo "Selected Options:"
+for option in "${selected_options[@]}"; do
+  echo "$option"
+done
+
+
+# end new menu
 
 #first run from the setup script
 if [[ $# -eq 0 ]] ; then
