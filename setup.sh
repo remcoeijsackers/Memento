@@ -41,28 +41,22 @@ else
 	read_assist="-p"
 fi
 
-# option to toggle a demo mode when setting up the program, for debugging.
-#if $initialised_pak
-#then
-#	demo_mode=false
-#else
-#    case $1 in
-#            "demo") demo_mode=true;;
-#			"") demo_mode=false;;
-#			"-ia") demo_mode=false;;
-#			"-ia demo") demo_mode=true;;
-#			#	exit 0;;
-#        esac
-#fi
 
-if [ $1 = "-ia" ]
-then 
-	interactive_mode=true
-else
-	interactive_mode=false
-fi
+check_interactivity() {
+	arg1="$1"
+	if [ -z "$arg1" ]; then
+  		arg1=""
+  	fi
+	if [ $arg1="-ia" ]
+	then 
+		interactive_mode=true
+	else
+		interactive_mode=false
+	fi
+}
 
-	
+check_interactivity $1
+
 
 #make an alias
 append_src () {
@@ -335,8 +329,8 @@ _gen() {
 	num=$(( ( RANDOM % 10 )  + 1 ))
 	num2=$(( ( RANDOM % 10 )  + 1 ))
 	ran=$num$num2"_script"
-	# TODO: change to default shell
-	echo "#!/bin/zsh" >> $ran.sh
+
+	echo "#!/bin/$usedshell" >> $ran.sh
 	echo "echo $ran testing command" >> $ran.sh
 	echo " " >> $ran.sh
 	echo $ran.sh
@@ -382,33 +376,32 @@ _start_setup() {
 		then
 			_change_config
 		else
-			if $demo_mode
-			then
-				echo "demo mode"
-				
-			else
-				_initialise_package
-			fi
+			_initialise_package
 		fi
 }
 
 _initialise_package() {
 	echo "#!/bin/$usedshell" >> $exp_file
 	echo "script_dir='$script_dir'" >> $exp_file
-	echo "restart_default=true" >> $exp_file
+	echo "restart_default=$restart_default" >> $exp_file
 	echo "initialised_pak=true" >> $exp_file
-	echo "callsign='mto'" >> $exp_file
-	echo "default_editor=vim" >> $exp_file
+	echo "callsign='$callsign'" >> $exp_file
+	echo "default_editor=$default_editor" >> $exp_file
 	tail -n +10 $filename >> $exp_file
-    make_global $exp_file mto
-	echo $colr "${green}${package} is initialised. use ${reset}'$callsign'${green} to call it.${reset}"
+	if $demo_mode
+	then
+		echo "demo mode, skipping move and permission adding of $exp_file"
+	else
+    	make_global $exp_file $callsign
+		echo $colr "${green}${package} is initialised. use ${reset}'$callsign'${green} to call it.${reset}"
+	fi
 	restart_shell
 }
 
 
 _change_config_shell() {
 		__manual_config() {
-			printf '%s ' "${cyan}default shell is:${reset} $shellname. ${cyan}change?${reset} (y/n)"
+			printf '%s ' "${cyan}default shell is:${reset} $usedshell. ${cyan}change?${reset} (y/n)"
 			read answer
 			if [ $answer = "n" ] || [ $answer = "N" ]
 			then
@@ -545,7 +538,6 @@ _change_config_remove_setup_file(){
   		fi
 }
 
-
 _change_shell() {
 	printf '%s ' "${cyan}new default shell: ${reset}"
 	read answer
@@ -558,21 +550,13 @@ _change_shell() {
 		chsh -s /bin/bash
 		echo -n $colr "${green}bash${reset} is the new default shell"
 	else 
-		echo $colr "${red}shell not supported, supported shells are: bash, zsh ${reset}"
+		echo $colr "${red}shell not tested, supported shells are: bash, zsh ${reset}"
 	fi
 }
 
 _change_config() {
-		# Change the settings
-		echo "#!/bin/$usedshell" >> $exp_file
-		if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
-		then
-			shellname="zsh"
-			echo $colr "${green}${package} configuration${reset}"
-		else
-			shellname=$usedshell
-    		echo $colr "${green}${package} configuration${reset}"
-		fi
+		echo "Memento" >> $exp_file
+
 		config_options=( "shell" "script_dir" "restart" "editor" "setup_file" "done" )
 
 		configured_parts=("done")
@@ -658,36 +642,15 @@ _change_config() {
 		if [ "$A" == "$B" ] ; then
 		    echo "All configuration done." ;
 		else
-			echo "Not all parts are configured. $unconfigured_remainder \n The default will be used" ;
+			echo "Not all parts are configured. $unconfigured_remainder \nThe default will be used." ;
 			autofill_default_config ;
 		fi;
-
-		# Change Shell
-		#_change_config_shell
-
-		# Change script dir
-		#_change_config_script_dir
-
-		# Restart default
-		#_change_config_restart_default
-
-		#Change Default editor
-		#_change_config_default_editor
-		
-		# remove the setup.sh contents
-		#if $demo_mode
-		#then 
-		#	echo "demo mode"
-		#else
-		#	_change_config_remove_setup_file
-		#fi
 
 		# initiliasisation check 
 		echo "initialised_pak=true" >> $exp_file
 
 		#change command name
-
-		_change_config_command_name
+		#_change_config_command_name
 
 		cmname=$(grep 'callsign' $exp_file)
 		cmd_name=$(cut -d "=" -f2 <<< "$cmname" | sed 's/^.//;s/.$//')
@@ -807,7 +770,35 @@ list_tags_interactively() {
 }
 
 
-# new menu
+#SETUP_RUN_CHECK
+if [[ $# -eq 0 ]] ; then
+    if [ $initialised_pak = false ]
+		then 
+			echo $colr "${cyan}${package} is not yet initialised, want to do that now?${reset} ?" 
+			printf '%s ' '(y/n)'
+			read answer
+			if [ $answer = 'y' ]
+				then 
+					chmod +x $filename
+					_setup_package
+					exit 0
+				else
+					exit 0
+				fi
+		else
+			print_help
+			break
+		fi
+    exit 0
+else
+	if $demo_mode
+		then 
+			echo
+	fi
+fi
+
+
+#INTERACTIVE_MODE
 
 # Define menu options with corresponding values
 options=("Help" "Option 2" "Submenu 1" "Install" "Exit")
@@ -1009,34 +1000,7 @@ for option in "${selected_options[@]}"; do
 done
 
 
-# end new menu
-
-#first run from the setup script
-if [[ $# -eq 0 ]] ; then
-    if [ $initialised_pak = false ]
-		then 
-			echo $colr "${cyan}${package} is not yet initialised, want to do that now?${reset} ?" 
-			printf '%s ' '(y/n)'
-			read answer
-			if [ $answer = 'y' ]
-				then 
-					chmod +x $filename
-					_setup_package
-					exit 0
-				else
-					exit 0
-				fi
-		else
-			print_help
-			break
-		fi
-    exit 0
-else
-	if $demo_mode
-		then 
-			echo
-	fi
-fi
+#END_INTERACTIVE_MODE
 
 while test $# -gt 0; do
   case "$1" in
