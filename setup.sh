@@ -1,4 +1,3 @@
-#!/bin/sh
 initialised_pak=false
 restart_default=false
 script_dir='/usr/local/bin'
@@ -8,8 +7,18 @@ default_editor='vim'
 
 
 
+
+
+
+
+
+
+
+
+
+
 #'''Change code only below this point============'''
-#'''The first 10 lines are checked during setup=='''
+#'''The first 20 lines are checked during setup=='''
 # MEMENTO
 
 red=`tput setaf 1`
@@ -26,6 +35,7 @@ TEMPFILE='_mto_cnt.tmp'
 demo_mode=false
 
 #for tagging without input, a counter file is used.
+#TODO: Just count the tags in (zsh)rc, count file is not needed
 if [ ! -f '_mto_cnt.tmp' ]; then
 	echo 0 > $TEMPFILE
 else
@@ -40,7 +50,6 @@ else
   colr="-e"
 	read_assist="-p"
 fi
-
 
 check_interactivity() {
 	arg1="$1"
@@ -57,9 +66,8 @@ check_interactivity() {
 
 check_interactivity $1
 
-
 #make an alias
-append_src () {
+append_src() {
 	if [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 	then
 		alname=$1
@@ -75,31 +83,24 @@ append_src () {
 	fi
 }
 
-#make a script globally exc
+#Make a script globally excecutable
 make_global() {
 	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 	then
-		#rename script for find function
-		new_scriptname="$extention$1"
-		mv $1 "${new_scriptname}"
-		#move scripts to bin
-		mv $PWD/"${new_scriptname}" $script_dir/
-		chmod +x $script_dir/"${new_scriptname}"
-		# add alias for script
-		echo "alias $2='${new_scriptname}' #alias made by $package" >> ~/.zshrc
+		rcfile="~/.zshrc"
 	elif  [ $usedshell = "/bin/bash" ] || [ $usedshell = "bash" ]
 	then
-		#rename script for find function
-		new_scriptname="$extention$1"
-		mv $1 "${new_scriptname}"
-		#move scripts to bin
-		mv $PWD/"${new_scriptname}" $script_dir/
-		chmod +x $script_dir/"${new_scriptname}"
-		# add alias for script
-		echo "alias $2='${new_scriptname}' #alias made by $package" >> ~/.bashrc
-	else 
-		_list_rc
+		rcfile="~/.bashrc"
 	fi
+
+	#rename script for find function
+	new_scriptname="$extention$1"
+	mv $1 "${new_scriptname}"
+	#move scripts to bin
+	mv $PWD/"${new_scriptname}" $script_dir/
+	chmod +x $script_dir/"${new_scriptname}"
+	# add alias for script
+	echo "alias $2='${new_scriptname}' #alias made by $package" >> ~/.zshrc
 }
 
 edit_script() {
@@ -283,7 +284,6 @@ tag() {
 }
 
 print_help() {
-	# Colors
 	cyan=$(tput setaf 6)
 	green=$(tput setaf 2)
 	reset=$(tput sgr0)
@@ -354,7 +354,6 @@ _start_setup() {
 		}
 
 		print_settings() {
-		# Print the settings in a table
 		  printf "\n"
 		  echo "${cyan}The default settings:${reset}"
 		  printf "\n"
@@ -387,15 +386,9 @@ _initialise_package() {
 	echo "initialised_pak=true" >> $exp_file
 	echo "callsign='$callsign'" >> $exp_file
 	echo "default_editor=$default_editor" >> $exp_file
-	tail -n +10 $filename >> $exp_file
-	if $demo_mode
-	then
-		echo "demo mode, skipping move and permission adding of $exp_file"
-	else
-    	make_global $exp_file $callsign
-		echo $colr "${green}${package} is initialised. use ${reset}'$callsign'${green} to call it.${reset}"
-	fi
-	restart_shell
+	tail -n +20 $filename >> $exp_file
+
+	_setup_complete $callsign
 }
 
 
@@ -554,11 +547,25 @@ _change_shell() {
 	fi
 }
 
+_setup_complete() {
+	command_named_param=$1
+	if $demo_mode
+	then 
+		echo "demo mode, skipping move and permission adding of $exp_file"
+	else
+		make_global $exp_file $command_named_param
+		echo $colr "${green}${package}${reset} is initialised. use ${green}'$command_named_param'${reset}  to call it."
+		
+		# Ending setup
+		restart_shell
+		exit 0
+	fi
+}
+
 _change_config() {
 		echo "Memento" >> $exp_file
 
 		config_options=( "shell" "script_dir" "restart" "editor" "setup_file" "done" )
-
 		configured_parts=("done")
 
 		while true; do
@@ -571,7 +578,6 @@ _change_config() {
 
 			case "$val" in
             	"done") 
-					echo "im done"
 					break
 					;;
             	"shell")
@@ -599,48 +605,41 @@ _change_config() {
 
 		A=${config_options[@]};
 		B=${configured_parts[@]};
+		# Check which options have not yet been configured
 		unconfigured_remainder=(`echo ${A[@]} ${B[@]} | tr ' ' '\n' | sort | uniq -u `)
 
 		autofill_default_config() {
 			autofilled_options=()
-			echo "unconfigured before handling: ${unconfigured_remainder[@]}"
 			for i in "${unconfigured_remainder[@]}"
 			do
 			   	case "$i" in
-            	"done") 
-					
-					;;
-            	"shell")
-					echo "shell unconfigured"
-            	    _change_config_shell  "default"
-					autofilled_options+="shell"
-					;;
-            	"script_dir")
-            	    _change_config_script_dir "default"
-					autofilled_options+="script_dir"
-					;;
-            	"restart")
-            	    _change_config_restart_default "default"
-					autofilled_options+="restart"
-					;;
-            	"editor")
-            	    _change_config_default_editor "default"
-					autofilled_options+="editor"
-					;;
-            	"setup_file")
-            	    _change_config_remove_setup_file "default"
-					autofilled_options+="setup_file"
-					;;
+            		"shell")
+            		    _change_config_shell  "default"
+						autofilled_options+="shell"
+						;;
+            		"script_dir")
+            		    _change_config_script_dir "default"
+						autofilled_options+="script_dir"
+						;;
+            		"restart")
+            		    _change_config_restart_default "default"
+						autofilled_options+="restart"
+						;;
+            		"editor")
+            		    _change_config_default_editor "default"
+						autofilled_options+="editor"
+						;;
+            		"setup_file")
+            		    _change_config_remove_setup_file "default"
+						autofilled_options+="setup_file"
+						;;
         		esac
-			   
 			done
-			echo "outfilled options: $autofilled_options"
-
 		}
 
 
 		if [ "$A" == "$B" ] ; then
-		    echo "All configuration done." ;
+			echo $colr "${green}${package}${reset} default configuration added." ;
 		else
 			echo "Not all parts are configured. $unconfigured_remainder \nThe default will be used." ;
 			autofill_default_config ;
@@ -652,27 +651,14 @@ _change_config() {
 		#change command name
 		#_change_config_command_name
 
+		# Add the script contents to the file
+		tail -n +20 $filename >> $exp_file
+
 		cmname=$(grep 'callsign' $exp_file)
 		cmd_name=$(cut -d "=" -f2 <<< "$cmname" | sed 's/^.//;s/.$//')
 
-		#Add the script contents to the file
-
-		tail -n +10 $filename >> $exp_file
-
-		if $demo_mode
-		then 
-			echo "demo mode: would move file otherwise"
-		else
-			make_global $exp_file $cmd_name
-			echo $colr "${green}${package} is initialised. use ${reset}'$cmd_name'${green} to call it.${reset}"
-			
-			# Ending setup
-			restart_shell
-			exit 0
-		fi
+		_setup_complete $cmd_name
 }
-
-
 
 _list_rc () {
 		echo "shellrc file not found. current shell: $usedshell"
