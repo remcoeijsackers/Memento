@@ -32,7 +32,6 @@ extention="_mto_"
 filename=`basename "$0"`
 exp_file="memento.sh"
 TEMPFILE='_mto_cnt.tmp'
-demo_mode=false
 
 #for tagging without input, a counter file is used.
 #TODO: Just count the tags in (zsh)rc, count file is not needed
@@ -51,22 +50,77 @@ else
 	read_assist="-p"
 fi
 
-check_interactivity() {
-	arg1="$1"
-	if [ -z "$arg1" ]; then
-  		arg1=""
-  	fi
-	if [ $arg1="-ia" ]
-	then 
-		interactive_mode=true
-	else
-		interactive_mode=false
+#==INITIAL_RUN===
+
+_initial_run_parser() {
+	intial_run_optional_args=( "demo" "-ia" "-skipinstall" )
+	intial_run_given_args=()
+
+	for arg in $@
+	do 
+		case "$arg" in
+			"demo")
+				demo_mode=true
+				intial_run_given_args+="$arg"
+				;;
+			"-ia")
+				interactive_mode=true
+				intial_run_given_args+="$arg"
+				;;
+			"-skipinstall")
+				skip_install=true
+				intial_run_given_args+="$arg"
+				;;
+		esac
+	done
+
+	B=${intial_run_optional_args[@]};
+
+	__initial_unconfigured_remainder=(`echo $@ ${B[@]} | tr ' ' '\n' | sort | uniq -u `)
+
+	auto_set_initial_args=()
+
+	for arg in "${__initial_unconfigured_remainder[@]}"
+	do 	
+		case "$arg" in
+			"demo")
+				demo_mode=false
+				auto_set_initial_args+="$arg"
+				;;
+			"-ia")
+				interactive_mode=false
+				auto_set_initial_args+="$arg"
+				;;
+			"-skipinstall")
+				skip_install=false
+				intial_run_given_args+="$arg"
+				;;
+		esac
+	done
+
+	C=${auto_set_initial_args[@]};
+	D=${__initial_unconfigured_remainder[@]};
+
+	__final_configured_remainder=(`echo ${C[@]} ${D[@]} | tr ' ' '\n' | sort | uniq -u `)
+	if $demo_mode
+	then
+		echo "Demo mode started, config:"
+		echo "demo mode: $demo_mode"
+		echo "interactive mode: $interactive_mode"
+		echo "skip install: $skip_install"
 	fi
 }
 
-check_interactivity $1
+#TODO: Either write a main argument parser (that passes it through)
+# Or mvoe the 'interactive mode' from this one.
+if [ $initialised_pak = false ]
+then
+	_initial_run_parser $@
+fi
 
-#make an alias
+#===FUNCTIONS===
+
+# make an alias
 append_src() {
 	if [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 	then
@@ -283,18 +337,23 @@ tag() {
 	fi
 }
 
+_remove_memento() {
+	remove_script _mto_memento.sh
+	find $script_dir/  -maxdepth 1 -name '_mto_memento.sh' 
+	remove_alias '_mto_memento.sh'
+	echo $colr "${cyan} ${package} is removed${reset}"
+	restart_shell
+}
+
 print_help() {
 	cyan=$(tput setaf 6)
 	green=$(tput setaf 2)
 	reset=$(tput sgr0)
 	red=$(tput setaf 1)
 
-	# Function to print a row in the table
 	print_row() {
 	  printf "| %-40s | %-60s \n" "$1" "$2"
 	}
-
-	# Function to print the help message
 
 	phelp() {
 	  printf "\n"
@@ -336,6 +395,7 @@ _gen() {
 	echo $ran.sh
 }
 
+#===SETUP===
 _setup_package() {
 	if [ $initialised_pak = true ]
 	then 
@@ -660,19 +720,13 @@ _change_config() {
 		_setup_complete $cmd_name
 }
 
+#===HELPERS===
+
 _list_rc () {
 		echo "shellrc file not found. current shell: $usedshell"
 		echo "rc files found:"
 		find ~/ -maxdepth 1 -name '*rc'
 		exit 1
-}
-
-_remove_memento() {
-	remove_script _mto_memento.sh
-	find $script_dir/  -maxdepth 1 -name '_mto_memento.sh' 
-	remove_alias '_mto_memento.sh'
-	echo $colr "${cyan} ${package} is removed${reset}"
-	restart_shell
 }
 
 function select_option {
@@ -756,9 +810,9 @@ list_tags_interactively() {
 }
 
 
-#SETUP_RUN_CHECK
+#===SETUP_RUN_CHECK===
 if [[ $# -eq 0 ]] ; then
-    if [ $initialised_pak = false ]
+    if [ $initialised_pak = false ] && [ $skip_install = false ]
 		then 
 			echo $colr "${cyan}${package} is not yet initialised, want to do that now?${reset} ?" 
 			printf '%s ' '(y/n)'
@@ -776,15 +830,9 @@ if [[ $# -eq 0 ]] ; then
 			break
 		fi
     exit 0
-else
-	if $demo_mode
-		then 
-			echo
-	fi
 fi
 
-
-#INTERACTIVE_MODE
+#===INTERACTIVE_MODE===
 
 # Define menu options with corresponding values
 options=("Help" "Option 2" "Submenu 1" "Install" "Exit")
@@ -1100,7 +1148,7 @@ while test $# -gt 0; do
       _setup_package
       ;;
 		*)
-			if [ $initialised_pak = false ]
+			if [ $initialised_pak = false ] && [ $skip_install = false ]
 			then 
 				printf '%s ' "${package}${cyan} is not yet initialised, want to do that now?${reset}(y/n)"
 				read answer
