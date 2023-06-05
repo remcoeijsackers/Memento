@@ -31,15 +31,7 @@ usedshell=$(ps -p $$ -ocomm=)
 extention="_mto_"
 filename=`basename "$0"`
 exp_file="memento.sh"
-TEMPFILE='_mto_cnt.tmp'
-
-#for tagging without input, a counter file is used.
-#TODO: Just count the tags in (zsh)rc, count file is not needed
-if [ ! -f '_mto_cnt.tmp' ]; then
-	echo 0 > $TEMPFILE
-else
-	tag_count=$[$(cat $TEMPFILE) + 1]
-fi
+count_of_tags=""
 
 # -e needed for bash colour output
 if [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
@@ -200,14 +192,12 @@ remove_all_tags() {
 		echo "" > ~/.zshrc
 		cat temp > ~/.zshrc
 		rm temp
-		rm $TEMPFILE
 	elif  [ $usedshell = "/bin/bash" ] || [ $usedshell == "bash" ]
 	then
 		sed "/tag/d" ~/.bashrc > temp
 		echo "" > ~/.bashrc
 		cat temp > ~/.bashrc
 		rm temp
-		rm $TEMPFILE
 	else 
 		_list_rc
 	fi
@@ -299,17 +289,23 @@ restart_shell() {
 }
 
 tag() {
+  file_path=~/.zshrc  # Replace with the path to your file
+  # Read the file contents into an array
+  array=()
+  while IFS= read -r line || [ -n "$line" ]; do
+      if [ "${line%#tag made by Memento}" != "$line" ]; then
+          alias_line=$(echo "$line" | sed -E "s/alias ([^=]+)='([^']+)' #tag made by Memento/\1='\2'/")
+          array+=("$alias_line")
+      fi
+  done < "$file_path"
+  count_of_tags="${#array[@]}"
+
   tagn=$(pwd)
   if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
 	then
 		if [ $# -eq 0 ]
 		then
-		if [ ! -f "$TEMPFILE" ]; then
-			echo 0 > $TEMPFILE
-		fi
-			echo $tag_count > $TEMPFILE
-			alname="t$(cat $TEMPFILE)" 
-			echo 'alname'
+			alname="t$count_of_tags" 
 		else
 			alname="$1"
 		fi
@@ -320,12 +316,7 @@ tag() {
 	then
 		if [ $# -eq 0 ]
 		then
-		if [ ! -f "$TEMPFILE" ]; then
-			echo 0 > $TEMPFILE
-		fi
-			echo $tag_count > $TEMPFILE
-			alname="t$(cat $TEMPFILE)" 
-			echo 'alname'
+			alname="t$count_of_tags" 
 		else
 			alname="$1"
 		fi
@@ -797,6 +788,8 @@ list_tags_interactively() {
 	        array+=("$alias_line")
 	    fi
 	done < "$file_path"
+	
+	$count_of_tags="${#array[@]}"
 
 	echo $colr "${cyan}${package} Tags ${reset}" 
 	select_option "${array[@]}"
