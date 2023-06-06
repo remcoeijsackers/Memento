@@ -1,4 +1,4 @@
-initialised_pak=false
+initialised_pak=true
 restart_default=false
 script_dir='/usr/local/bin'
 callsign='mto'
@@ -802,6 +802,28 @@ list_tags_interactively() {
 
 }
 
+select_file_in_dir() {
+	clear
+
+	# Get all the files in the current working directory
+	files=$(ls -1)
+
+	# Store the files in an array
+	file_array=($files)
+
+	# Display the menu
+	echo "Select a file:"
+
+	select_option "${file_array[@]}"
+	choice=$?
+
+	val=${file_array[$choice]}
+
+	# return the string
+	echo "$val"
+}
+
+#select_file_in_dir
 
 #===SETUP_RUN_CHECK===
 if [[ $# -eq 0 ]] ; then
@@ -828,12 +850,12 @@ fi
 #===INTERACTIVE_MODE===
 
 # Define menu options with corresponding values
-options=("Help" "Option 2" "Submenu 1" "Install" "Exit")
+options=("Help" "Resources" "Script" "Install" "Exit")
 values=("value1" "value2" "submenu1" "install" "exit")
 
 # Define submenu options with corresponding values
-submenu=("Suboption 1" "Suboption 2" "Back")
-submenu_values=("subvalue1" "subvalue2" "back")
+submenu=("Create" "List" "Back")
+submenu_values=("create" "list" "Back")
 
 # Set initial cursor position
 cursor=0
@@ -899,19 +921,27 @@ process_option() {
 	  print_help
       # Call your function for Option 1 here
       ;;
-    "Option 2")
+    "Script")
       echo "${GREEN}Calling function for Option 2${NC}"
       # Call your function for Option 2 here
       ;;
-    "Suboption 1")
-      echo "${GREEN}Calling function for Suboption 1${NC}"
+    "List")
+      echo "${GREEN}Calling function for $selected_option ${submenu_values[$cursor]} ${NC}"
       # Call your function for Suboption 1 here
       ;;
-    "Suboption 2")
-      echo "${GREEN}Calling function for Suboption 2${NC}"
-      # Call your function for Suboption 2 here
+    "Create")
+      echo "${GREEN}Calling function for $selected_option ${submenu_values[$cursor]} ${NC}"
+	  #use_string() {
+  	#	local input_string=$1
+  	#	echo "$input_string"
+  	#	# Perform some operation using the string value
+	  #}
+      select_file_in_dir
+
+      file_chosen_result=$(select_file_in_dir)
+	  echo "the file that was chosen is $file_chosen_result"
       ;;
-	"Install")
+	"Tag")
 		if $initialised_pak 
 		then
       		echo "${red}Already installed.${NC}"
@@ -934,8 +964,10 @@ process_option() {
   exit 0
 }
 
+keep_loop=true
+
 # Main menu loop
-while $interactive_mode; do
+while $interactive_mode & $keep_loop; do
   display_menu
 
   # Read user input
@@ -963,7 +995,7 @@ while $interactive_mode; do
           process_option "$selected_option"
           ;;
         2) # Submenu 1
-          while true; do
+          while $interactive_mode & $keep_loop; do
             display_submenu
 
             # Read user input
@@ -982,9 +1014,10 @@ while $interactive_mode; do
                 ;;
               "") # Enter key
                 case "$cursor" in
-                  0) # Suboption 1
+                  0) # Create
                     selected_option="${submenu[$cursor]}"
                     process_option "$selected_option"
+					$keep_loop=false
                     ;;
                   1) # Suboption 2
                     selected_option="${submenu[$cursor]}"
