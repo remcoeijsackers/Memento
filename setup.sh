@@ -1,4 +1,4 @@
-initialised_pak=true
+initialised_pak=false
 restart_default=false
 script_dir='/usr/local/bin'
 callsign='mto'
@@ -32,6 +32,7 @@ extention="_mto_"
 filename=`basename "$0"`
 exp_file="memento.sh"
 count_of_tags=""
+rc_file="~/.zshrc" #TODO: Replace during the init setup
 
 # -e needed for bash colour output
 if [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
@@ -777,7 +778,7 @@ function select_option {
 }
 
 
-list_tags_interactively() {
+interactive_list_tags() {
 	file_path=~/.zshrc  # Replace with the path to your file
 
 	# Read the file contents into an array
@@ -789,7 +790,7 @@ list_tags_interactively() {
 	    fi
 	done < "$file_path"
 	
-	$count_of_tags="${#array[@]}"
+	count_of_tags="${#array[@]}"
 
 	echo $colr "${cyan}${package} Tags ${reset}" 
 	select_option "${array[@]}"
@@ -797,33 +798,55 @@ list_tags_interactively() {
 
 	val=${array[$choice]}
 
-	echo "Chosen index = $choice"
-	echo "        value = $val"
+	string_before_equal="${val%%=*}"
 
+	get_part_after_equal() {
+	  local input="$1"
+	  IFS="=" read -ra parts <<< "$input"
+	  if [ "${#parts[@]}" -lt 2 ]; then
+	    echo "Invalid input. '=' not found."
+	  else
+	    echo "${parts[1]}"
+	  fi
+	}
+
+	command=$(get_part_after_equal "$val")
+
+	get_value_after_space() {
+  		local input="$1"
+  		IFS=" " read -ra parts <<< "$input"
+  		if [ "${#parts[@]}" -lt 2 ]; then
+  		  echo "Invalid input. Space not found."
+  		else
+  		  echo "${parts[1]}"
+  		fi
+	}
+
+	result=$(get_value_after_space "${command%?}")
+	#echo "result is $result"
+	cd $result
+	#echo $PWD
 }
 
-select_file_in_dir() {
-	clear
 
+interactive_script_maker() {
 	# Get all the files in the current working directory
 	files=$(ls -1)
 
 	# Store the files in an array
 	file_array=($files)
 
-	# Display the menu
-	echo "Select a file:"
-
 	select_option "${file_array[@]}"
 	choice=$?
 
-	val=${file_array[$choice]}
+	script="${file_array[$choice]}"
 
-	# return the string
-	echo "$val"
+	echo $colr "${cyan}${package}Please enter script alias: ${reset}" 
+	printf '%s '
+	read alias
+	make_global $script $alias
 }
 
-#select_file_in_dir
 
 #===SETUP_RUN_CHECK===
 if [[ $# -eq 0 ]] ; then
@@ -850,7 +873,7 @@ fi
 #===INTERACTIVE_MODE===
 
 # Define menu options with corresponding values
-options=("Help" "Resources" "Script" "Install" "Exit")
+options=("Help" "Tags" "Script" "Install" "Exit")
 values=("value1" "value2" "submenu1" "install" "exit")
 
 # Define submenu options with corresponding values
@@ -931,26 +954,10 @@ process_option() {
       ;;
     "Create")
       echo "${GREEN}Calling function for $selected_option ${submenu_values[$cursor]} ${NC}"
-	  #use_string() {
-  	#	local input_string=$1
-  	#	echo "$input_string"
-  	#	# Perform some operation using the string value
-	  #}
-      select_file_in_dir
-
-      file_chosen_result=$(select_file_in_dir)
-	  echo "the file that was chosen is $file_chosen_result"
+	  interactive_script_maker
       ;;
-	"Tag")
-		if $initialised_pak 
-		then
-      		echo "${red}Already installed.${NC}"
-			break
-		else
-			echo "${green}Starting setup.${NC}"
-			_setup_package
-			break
-		fi
+	"Tags")
+	  interactive_list_tags
       ;;
 	"Exit")
 		exit 0;;
@@ -990,7 +997,7 @@ while $interactive_mode & $keep_loop; do
           selected_option="${options[$cursor]}"
           process_option "$selected_option"
           ;;
-        1) # Option 2
+        1) #Tags
           selected_option="${options[$cursor]}"
           process_option "$selected_option"
           ;;
@@ -1015,11 +1022,12 @@ while $interactive_mode & $keep_loop; do
               "") # Enter key
                 case "$cursor" in
                   0) # Create
+				  	#keep_loop=false
                     selected_option="${submenu[$cursor]}"
                     process_option "$selected_option"
-					$keep_loop=false
                     ;;
                   1) # Suboption 2
+				  	#keep_loop=false
                     selected_option="${submenu[$cursor]}"
                     process_option "$selected_option"
                     ;;
@@ -1040,7 +1048,7 @@ while $interactive_mode & $keep_loop; do
           echo "${RED}Exiting${NC}"
           exit 0
           ;;
-        *) # Invalid selection
+        *)
           ;;
       esac
       ;;
@@ -1065,7 +1073,7 @@ done
 while test $# -gt 0; do
   case "$1" in
 	-o)
-	list_tags_interactively
+	interactive_list_tags
 	exit 1;;
 
     -h|--help)
