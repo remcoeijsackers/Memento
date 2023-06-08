@@ -1,9 +1,9 @@
 initialised_pak=false
 restart_default=false
-script_dir='/usr/local/bin'
+script_dir='/Users/remcoeijsackers/codebin/scripts/source/'
 callsign='mto'
 default_editor='vim'
-
+rc_file=~/.zshrc #TODO: Replace during the init setup
 
 
 
@@ -28,11 +28,11 @@ reset=`tput sgr0`
 
 package='Memento'
 usedshell=$(ps -p $$ -ocomm=)
-extention="_mto_"
+extention="mto"
 filename=`basename "$0"`
 exp_file="memento.sh"
 count_of_tags=""
-rc_file="~/.zshrc" #TODO: Replace during the init setup
+
 
 # -e needed for bash colour output
 if [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
@@ -43,41 +43,38 @@ else
 	read_assist="-p"
 fi
 
-check_rc_file() {
+dir_exits() {
+	if [ -d "$1" ]; then
+  		echo "1"
+	else
+		echo "0"
+	fi
+}
+file_exists() {
 	if [ -f "$1" ]; then
 	    echo "1"
 	else
 	    echo "0"
 	fi
 }
-
-#y="$(check_rc_file $rc_file)"
-#
-#if [ $y -eq 1 ];
-#then
-#    echo "yay $y"
-#else 
-#    echo "no $y"
-#fi
-
 #==INITIAL_RUN===
 
 _initial_run_parser() {
-	intial_run_optional_args=( "demo" "-ia" "-skipinstall" )
+	intial_run_optional_args=( "--demo" "--ia" "--skipinstall" )
 	intial_run_given_args=()
 
 	for arg in $@
 	do 
 		case "$arg" in
-			"demo")
+			"--demo")
 				demo_mode=true
 				intial_run_given_args+="$arg"
 				;;
-			"-ia")
+			"--ia")
 				interactive_mode=true
 				intial_run_given_args+="$arg"
 				;;
-			"-skipinstall")
+			"--skipinstall")
 				skip_install=true
 				intial_run_given_args+="$arg"
 				;;
@@ -93,15 +90,15 @@ _initial_run_parser() {
 	for arg in "${__initial_unconfigured_remainder[@]}"
 	do 	
 		case "$arg" in
-			"demo")
+			"--demo")
 				demo_mode=false
 				auto_set_initial_args+="$arg"
 				;;
-			"-ia")
+			"--ia")
 				interactive_mode=false
 				auto_set_initial_args+="$arg"
 				;;
-			"-skipinstall")
+			"--skipinstall")
 				skip_install=false
 				intial_run_given_args+="$arg"
 				;;
@@ -122,7 +119,7 @@ _initial_run_parser() {
 }
 
 #TODO: Either write a main argument parser (that passes it through)
-# Or mvoe the 'interactive mode' from this one.
+# Or move the 'interactive mode' from this one.
 if [ $initialised_pak = false ]
 then
 	_initial_run_parser $@
@@ -132,7 +129,7 @@ fi
 
 # make an alias
 append_src() {
-	y="$(check_rc_file $rc_file)"
+	y="$(file_exists $rc_file)"
 	if [ $y -eq 1 ]
 	then 
 		alname=$1
@@ -145,13 +142,14 @@ append_src() {
 
 #Make a script globally excecutable
 make_global() {
-	y="$(check_rc_file $rc_file)"
-	if [ $y -eq 1 ]
+	y="$(file_exists $rc_file)"
+	if [ $y -eq "1" ]
 	then 
 		continue
 	else
 		_list_rc
 	fi
+
 
 	#rename script for find function
 	new_scriptname="$extention$1"
@@ -171,21 +169,34 @@ edit_script() {
 	fi
 }
 
+#"$(find ~/ -maxdepth 1 -name .zshrc )"
 list_aliases() {
-	y="$(check_rc_file $rc_file)"
+	y="$(file_exists $rc_file)"
 	if [ $y -eq 1 ]
 	then 
-		continue
+		grep "alias made by $package" "${rc_file}"
 	else
 		_list_rc
 	fi
-
-	grep "alias made by $package" $rc_file
-
+	
 }
 
+
 list_scripts() {
-	find $script_dir -name "$extention*"
+	#find /Users/remcoeijsackers/codebin/scripts -name "mto*"
+	y="$(dir_exits $script_dir)"
+	if [ $y -eq 1 ]
+	then
+		scripts="$(find $script_dir -name "_${extention}_*")"
+		if $scripts
+		then
+			echo $scripts
+		else
+			echo $colr "no scripts found in: ${green}$script_dir ${reset}"
+		fi
+	else
+		_list_script_dir
+	fi
 }
 
 list_tags() {
@@ -388,6 +399,231 @@ print_help() {
 	}
 	phelp
 }
+
+_list_rc () {
+		echo $colr  "rc file not found. shell: ${cyan} $usedshell ${reset}" 
+		echo $colr "Searched for: ${cyan} $rc_file ${reset}"
+		echo "\nrc files found:"
+		find ~/ -maxdepth 1 -name '*rc'
+		exit 1
+}
+
+_list_script_dir () {
+		echo $colr  "script dir not found. shell: ${cyan} $usedshell ${reset}" 
+		echo $colr "Searched for: ${cyan} $script_dir ${reset}"
+		exit 1
+}
+
+function select_option {
+    ESC=$( printf "\033")
+    cursor_blink_on()  { printf "$ESC[?25h"; }
+    cursor_blink_off() { printf "$ESC[?25l"; }
+    cursor_to()        { printf "$ESC[$1;${2:-1}H"; }
+    print_option()     { printf "   $1 "; }
+    print_selected()   { printf "  $ESC[7m $1 $ESC[27m"; }
+    get_cursor_row()   { IFS=';' read -sdR -p $'\E[6n' ROW COL; echo ${ROW#*[}; }
+    key_input()        { read -s -n3 key 2>/dev/null >&2
+                         if [[ $key = $ESC[A ]]; then echo up;    fi
+                         if [[ $key = $ESC[B ]]; then echo down;  fi
+                         if [[ $key = ""     ]]; then echo enter; fi; }
+
+    # initially print empty new lines (scroll down if at bottom of screen)
+    for opt; do printf "\n"; done
+
+    # determine current screen position for overwriting the options
+    local lastrow=`get_cursor_row`
+    local startrow=$(($lastrow - $#))
+
+    # ensure cursor and input echoing back on upon a ctrl+c during read -s
+    trap "cursor_blink_on; stty echo; printf '\n'; exit" 2
+    cursor_blink_off
+
+    local selected=0
+    while true; do
+        # print options by overwriting the last lines
+        local idx=0
+        for opt; do
+            cursor_to $(($startrow + $idx))
+            if [ $idx -eq $selected ]; then
+                print_selected "$opt"
+            else
+                print_option "$opt"
+            fi
+            ((idx++))
+        done
+
+        # user key control
+        case `key_input` in
+            enter) break;;
+            up)    ((selected--));
+                   if [ $selected -lt 0 ]; then selected=$(($# - 1)); fi;;
+            down)  ((selected++));
+                   if [ $selected -ge $# ]; then selected=0; fi;;
+        esac
+    done
+
+    # cursor position back to normal
+    cursor_to $lastrow
+    printf "\n"
+    cursor_blink_on
+
+    return $selected
+}
+
+
+interactive_list_tags() {
+	file_path=$rc_file  # Replace with the path to your file
+
+	# Read the file contents into an array
+	array=()
+	while IFS= read -r line || [ -n "$line" ]; do
+	    if [ "${line%#tag made by Memento}" != "$line" ]; then
+	        alias_line=$(echo "$line" | sed -E "s/alias ([^=]+)='([^']+)' #tag made by Memento/\1='\2'/")
+	        array+=("$alias_line")
+	    fi
+	done < "$file_path"
+	
+	count_of_tags="${#array[@]}"
+	if [ $count_of_tags -lt 1 ]
+	then
+		echo $colr "No tags found in $rc_file"
+		exit 0
+	fi
+
+	echo $colr "${cyan}${package} Tags ${reset}" 
+	select_option "${array[@]}"
+	choice=$?
+
+	val=${array[$choice]}
+
+	string_before_equal="${val%%=*}"
+
+	get_part_after_equal() {
+	  local input="$1"
+	  IFS="=" read -ra parts <<< "$input"
+	  if [ "${#parts[@]}" -lt 2 ]; then
+	    echo "Invalid input. '=' not found."
+	  else
+	    echo "${parts[1]}"
+	  fi
+	}
+
+	command=$(get_part_after_equal "$val")
+
+	get_value_after_space() {
+  		local input="$1"
+  		IFS=" " read -ra parts <<< "$input"
+  		if [ "${#parts[@]}" -lt 2 ]; then
+  		  echo "Invalid input. Space not found."
+  		else
+  		  echo "${parts[1]}"
+  		fi
+	}
+
+	result=$(get_value_after_space "${command%?}")
+	#echo "result is $result"
+	cd $result
+	#echo $PWD
+}
+
+
+interactive_script_maker() {
+	# Get all the files in the current working directory
+	files=$(ls -1)
+
+	# Store the files in an array
+	file_array=($files)
+
+	select_option "${file_array[@]}"
+	choice=$?
+
+	script="${file_array[$choice]}"
+
+	echo $colr "${cyan}${package}Please enter script alias: ${reset}" 
+	printf '%s '
+	read alias
+	make_global $script $alias
+}
+
+interactive_list_aliases() {
+	y="$(file_exists $rc_file)"
+	if [ $y -eq 1 ]
+	then 
+		echo
+	else
+		_list_rc
+	fi
+	file_path=$rc_file  # Replace with the path to your file
+
+	# Read the file contents into an array
+	array=()
+	while IFS= read -r line || [ -n "$line" ]; do
+	    if [ "${line%#alias made by Memento}" != "$line" ]; then
+	        alias_line=$(echo "$line" | sed -E "s/alias ([^=]+)='([^']+)' #alias made by Memento/\1='\2'/")
+	        array+=("$alias_line")
+	    fi
+	done < "$file_path"
+	
+	count_of_tags="${#array[@]}"
+	if [ $count_of_tags -lt 1 ]
+	then
+		echo $colr "No tags found in $rc_file"
+		exit 0
+	fi
+
+	echo $colr "${cyan}${package} Aliases ${reset}" 
+	select_option "${array[@]}"
+	choice=$?
+
+	val=${array[$choice]}
+
+	string_before_equal="${val%%=*}"
+
+	get_part_before_equal() {
+	  local input="$1"
+	  IFS="=" read -ra parts <<< "$input"
+	  if [ "${#parts[@]}" -lt 2 ]; then
+	    echo "Invalid input. '=' not found."
+	  else
+	    echo "${parts[0]}"
+	  fi
+	}
+
+	command=$(get_part_before_equal "$val")
+	echo "result is $command"
+
+	#carry out the alias (make sure its sourced correctly)
+	$command
+
+}
+
+
+
+#===END_FUNCTIONS===
+
+#===SETUP_RUN_CHECK===
+if [[ $# -eq 0 ]] ; then
+    if [ $initialised_pak = false ] && [ $skip_install = false ]
+		then 
+			echo $colr "${cyan}${package} is not yet initialised, want to do that now?${reset} ?" 
+			echo "Note: A trial (non destructive) run can be started with\n./setup.sh --demo --skipinstall"
+			printf '%s ' '(y/n)'
+			read answer
+			if [ $answer = 'y' ]
+				then 
+					chmod +x $filename
+					_setup_package
+					exit 0
+				else
+					exit 0
+				fi
+		else
+			print_help
+			break
+		fi
+    exit 0
+fi
+#===END_SETUP_RUN_CHECK===
 
 # random script generator, to be used for tests
 _gen() {
@@ -740,355 +976,200 @@ _change_config() {
 		_setup_complete $cmd_name
 }
 
-#===HELPERS===
+#===END_SETUP===
 
-_list_rc () {
-		echo "shellrc file not found. current shell: $usedshell"
-		echo "rc files found:"
-		find ~/ -maxdepth 1 -name '*rc'
-		exit 1
-}
-
-function select_option {
-    ESC=$( printf "\033")
-    cursor_blink_on()  { printf "$ESC[?25h"; }
-    cursor_blink_off() { printf "$ESC[?25l"; }
-    cursor_to()        { printf "$ESC[$1;${2:-1}H"; }
-    print_option()     { printf "   $1 "; }
-    print_selected()   { printf "  $ESC[7m $1 $ESC[27m"; }
-    get_cursor_row()   { IFS=';' read -sdR -p $'\E[6n' ROW COL; echo ${ROW#*[}; }
-    key_input()        { read -s -n3 key 2>/dev/null >&2
-                         if [[ $key = $ESC[A ]]; then echo up;    fi
-                         if [[ $key = $ESC[B ]]; then echo down;  fi
-                         if [[ $key = ""     ]]; then echo enter; fi; }
-
-    # initially print empty new lines (scroll down if at bottom of screen)
-    for opt; do printf "\n"; done
-
-    # determine current screen position for overwriting the options
-    local lastrow=`get_cursor_row`
-    local startrow=$(($lastrow - $#))
-
-    # ensure cursor and input echoing back on upon a ctrl+c during read -s
-    trap "cursor_blink_on; stty echo; printf '\n'; exit" 2
-    cursor_blink_off
-
-    local selected=0
-    while true; do
-        # print options by overwriting the last lines
-        local idx=0
-        for opt; do
-            cursor_to $(($startrow + $idx))
-            if [ $idx -eq $selected ]; then
-                print_selected "$opt"
-            else
-                print_option "$opt"
-            fi
-            ((idx++))
-        done
-
-        # user key control
-        case `key_input` in
-            enter) break;;
-            up)    ((selected--));
-                   if [ $selected -lt 0 ]; then selected=$(($# - 1)); fi;;
-            down)  ((selected++));
-                   if [ $selected -ge $# ]; then selected=0; fi;;
-        esac
-    done
-
-    # cursor position back to normal
-    cursor_to $lastrow
-    printf "\n"
-    cursor_blink_on
-
-    return $selected
-}
-
-
-interactive_list_tags() {
-	file_path=~/.zshrc  # Replace with the path to your file
-
-	# Read the file contents into an array
-	array=()
-	while IFS= read -r line || [ -n "$line" ]; do
-	    if [ "${line%#tag made by Memento}" != "$line" ]; then
-	        alias_line=$(echo "$line" | sed -E "s/alias ([^=]+)='([^']+)' #tag made by Memento/\1='\2'/")
-	        array+=("$alias_line")
-	    fi
-	done < "$file_path"
-	
-	count_of_tags="${#array[@]}"
-
-	echo $colr "${cyan}${package} Tags ${reset}" 
-	select_option "${array[@]}"
-	choice=$?
-
-	val=${array[$choice]}
-
-	string_before_equal="${val%%=*}"
-
-	get_part_after_equal() {
-	  local input="$1"
-	  IFS="=" read -ra parts <<< "$input"
-	  if [ "${#parts[@]}" -lt 2 ]; then
-	    echo "Invalid input. '=' not found."
-	  else
-	    echo "${parts[1]}"
-	  fi
-	}
-
-	command=$(get_part_after_equal "$val")
-
-	get_value_after_space() {
-  		local input="$1"
-  		IFS=" " read -ra parts <<< "$input"
-  		if [ "${#parts[@]}" -lt 2 ]; then
-  		  echo "Invalid input. Space not found."
-  		else
-  		  echo "${parts[1]}"
-  		fi
-	}
-
-	result=$(get_value_after_space "${command%?}")
-	#echo "result is $result"
-	cd $result
-	#echo $PWD
-}
-
-
-interactive_script_maker() {
-	# Get all the files in the current working directory
-	files=$(ls -1)
-
-	# Store the files in an array
-	file_array=($files)
-
-	select_option "${file_array[@]}"
-	choice=$?
-
-	script="${file_array[$choice]}"
-
-	echo $colr "${cyan}${package}Please enter script alias: ${reset}" 
-	printf '%s '
-	read alias
-	make_global $script $alias
-}
-
-
-#===SETUP_RUN_CHECK===
-if [[ $# -eq 0 ]] ; then
-    if [ $initialised_pak = false ] && [ $skip_install = false ]
-		then 
-			echo $colr "${cyan}${package} is not yet initialised, want to do that now?${reset} ?" 
-			printf '%s ' '(y/n)'
-			read answer
-			if [ $answer = 'y' ]
-				then 
-					chmod +x $filename
-					_setup_package
-					exit 0
-				else
-					exit 0
-				fi
-		else
-			print_help
-			break
-		fi
-    exit 0
-fi
 
 #===INTERACTIVE_MODE===
 
-# Define menu options with corresponding values
-options=("Help" "Tags" "Script" "Install" "Exit")
-values=("value1" "value2" "submenu1" "install" "exit")
+interactive_menu() {
+	# Define menu options with corresponding values
+	options=("Help" "Tags" "Script" "Aliases" "Exit")
+	values=("value1" "value2" "submenu1" "aliases" "exit")
+	# Define submenu options with corresponding values
+	submenu=("Create" "List" "Back")
+	submenu_values=("create" "list" "back")
 
-# Define submenu options with corresponding values
-submenu=("Create" "List" "Back")
-submenu_values=("create" "list" "Back")
+	# Set initial cursor position
+	cursor=0
 
-# Set initial cursor position
-cursor=0
+	# Define color codes
+	RED='\033[0;31m'
+	GREEN='\033[0;32m'
+	YELLOW='\033[0;33m'
+	BLUE='\033[0;34m'
+	NC='\033[0m' # No Color
 
-# Define color codes
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+	# Array to store selected options
+	selected_options=()
 
-# Array to store selected options
-selected_options=()
+	if $demo_mode
+	then
+		demo_mode_text="demo"
+	else
+		demo_mode_text=""
+	fi
 
-if $demo_mode
-then 
-	demo_mode_text="demo"
-else
-	demo_mode_text=""
-fi
+	# Function to display the menu
+	#TODO: These 2 can be one function, with the arrays as input.
 
-# Function to display the menu
-display_menu() {
-  clear
-  echo "${BLUE}*********************************************"
-  echo "                 Memento $demo_mode_text"
-  echo "*********************************************${NC}"
+	display_menu() {
+	  clear
+	  echo "${BLUE}*********************************************"
+	  echo "                 Memento $demo_mode_text"
+	  echo "*********************************************${NC}"
 
-  for ((i=0; i<${#options[@]}; i++)); do
-    if [ $i -eq $cursor ]; then
-      echo "${YELLOW} ► ${options[$i]}${NC}"
-    else
-      echo "   ${options[$i]}"
-    fi
-  done
+		  for ((i=0; i<${#options[@]}; i++)); do
+		    if [ $i -eq $cursor ]; then
+		      echo "${YELLOW} ► ${options[$i]}${NC}"
+		    else
+		      echo "   ${options[$i]}"
+		    fi
+		  done
+	}
+
+	# Function to display submenu
+	display_submenu() {
+	  clear
+	  echo "${BLUE}*********************************************"
+	  echo "                Memento - $1"
+	  echo "*********************************************${NC}"
+
+		  for ((i=0; i<${#submenu[@]}; i++)); do
+		    if [ $i -eq $cursor ]; then
+		      echo "${YELLOW} ► ${submenu[$i]}${NC}"
+		    else
+		      echo "   ${submenu[$i]}"
+		    fi
+		  done
+	}
+
+	# Function to process selected option
+	process_option() {
+	  selected_option=$1
+	  echo "Processing option: $selected_option"
+
+	  # Example: Call another function based on the selected option
+	  case "$selected_option" in
+	    "Help")
+	      echo "${GREEN}Calling function for Option 1${NC}"
+		  print_help
+	      # Call your function for Option 1 here
+	      ;;
+	    "Script")
+	      echo "${GREEN}Calling function for Option 2${NC}"
+	      # Call your function for Option 2 here
+	      ;;
+	    "List")
+	      echo "${GREEN}Calling function for $selected_option ${submenu_values[$cursor]} ${NC}"
+	      # Call your function for Suboption 1 here
+	      ;;
+	    "Create")
+	      echo "${GREEN}Calling function for $selected_option ${submenu_values[$cursor]} ${NC}"
+		  interactive_script_maker
+	      ;;
+		"Tags")
+		  interactive_list_tags
+	      ;;
+		"Aliases")
+		  interactive_list_aliases
+	      ;;
+		"Exit")
+			exit 0;;
+		*)
+		echo "Unkown option"
+		exit 0
+	  esac
+
+	  # Store selected option-value pair in the array
+	  selected_options+=("$selected_option:${values[$cursor]}")
+	  exit 0
+	}
+
+	# Main menu loop
+	while true; do
+	  display_menu
+
+	  # Read user input
+	  read -rsn1 key
+
+	  case "$key" in
+	    A) # Up arrow
+	      if [ $cursor -gt 0 ]; then
+	        cursor=$((cursor - 1))
+	      fi
+	      ;;
+	    B) # Down arrow
+	      if [ $cursor -lt $(( ${#options[@]} - 1 )) ]; then
+	        cursor=$((cursor + 1))
+	      fi
+	      ;;
+	    "") # Enter key
+	      case "$cursor" in
+	        0) # Help
+	          selected_option="${options[$cursor]}"
+	          process_option "$selected_option"
+	          ;;
+	        1) #Tags
+	          selected_option="${options[$cursor]}"
+	          process_option "$selected_option"
+	          ;;
+	        2) #Scripts
+	          while true; do
+	            display_submenu "Scripts"
+
+	            # Read user input
+	            read -rsn1 key
+
+	            case "$key" in
+	              A) # Up arrow
+	                if [ $cursor -gt 0 ]; then
+	                  cursor=$((cursor - 1))
+	                fi
+	                ;;
+	              B) # Down arrow
+	                if [ $cursor -lt $(( ${#submenu[@]} - 1 )) ]; then
+	                  cursor=$((cursor + 1))
+	                fi
+	                ;;
+	              "") # Enter key
+	                case "$cursor" in
+	                  0) # Create
+	                    selected_option="${submenu[$cursor]}"
+	                    process_option "$selected_option"
+	                    ;;
+	                  1) # List
+	                    selected_option="${submenu[$cursor]}"
+	                    process_option "$selected_option"
+	                    ;;
+	                  2) # Back
+	                    break
+	                    ;;
+	                esac
+	                ;;
+	            esac
+	          done
+	          ;;
+	        3) # Aliases
+	          selected_option="${options[$cursor]}"
+	          process_option "$selected_option"
+	          ;;
+	        4) # Exit
+	          echo "${RED}Exiting${NC}"
+	          exit 0
+	          ;;
+	        *)
+	          ;;
+	      esac
+	      ;;
+	  esac
+
+	  # Exit if a root-level option is selected
+	  if [ "$cursor" -ge "${#options[@]}" ]; then
+	    echo "${RED}Exiting...${NC}"
+	    exit 0
+	  fi
+	done
 }
-
-# Function to display submenu
-display_submenu() {
-  clear
-  echo "${BLUE}*********************************************"
-  echo "                Memento - "
-  echo "*********************************************${NC}"
-
-  for ((i=0; i<${#submenu[@]}; i++)); do
-    if [ $i -eq $cursor ]; then
-      echo "${YELLOW} ► ${submenu[$i]}${NC}"
-    else
-      echo "   ${submenu[$i]}"
-    fi
-  done
-}
-
-# Function to process selected option
-process_option() {
-  selected_option=$1
-  echo "Processing option: $selected_option"
-
-  # Example: Call another function based on the selected option
-  case "$selected_option" in
-    "Help")
-      echo "${GREEN}Calling function for Option 1${NC}"
-	  print_help
-      # Call your function for Option 1 here
-      ;;
-    "Script")
-      echo "${GREEN}Calling function for Option 2${NC}"
-      # Call your function for Option 2 here
-      ;;
-    "List")
-      echo "${GREEN}Calling function for $selected_option ${submenu_values[$cursor]} ${NC}"
-      # Call your function for Suboption 1 here
-      ;;
-    "Create")
-      echo "${GREEN}Calling function for $selected_option ${submenu_values[$cursor]} ${NC}"
-	  interactive_script_maker
-      ;;
-	"Tags")
-	  interactive_list_tags
-      ;;
-	"Exit")
-		exit 0;;
-	*)
-	echo "Unkown option"
-	exit 0
-  esac
-
-  # Store selected option-value pair in the array
-  selected_options+=("$selected_option:${values[$cursor]}")
-  exit 0
-}
-
-keep_loop=true
-
-# Main menu loop
-while $interactive_mode & $keep_loop; do
-  display_menu
-
-  # Read user input
-  read -rsn1 key
-
-  case "$key" in
-    A) # Up arrow
-      if [ $cursor -gt 0 ]; then
-        cursor=$((cursor - 1))
-      fi
-      ;;
-    B) # Down arrow
-      if [ $cursor -lt $(( ${#options[@]} - 1 )) ]; then
-        cursor=$((cursor + 1))
-      fi
-      ;;
-    "") # Enter key
-      case "$cursor" in
-        0) # Help
-          selected_option="${options[$cursor]}"
-          process_option "$selected_option"
-          ;;
-        1) #Tags
-          selected_option="${options[$cursor]}"
-          process_option "$selected_option"
-          ;;
-        2) # Submenu 1
-          while $interactive_mode & $keep_loop; do
-            display_submenu
-
-            # Read user input
-            read -rsn1 key
-
-            case "$key" in
-              A) # Up arrow
-                if [ $cursor -gt 0 ]; then
-                  cursor=$((cursor - 1))
-                fi
-                ;;
-              B) # Down arrow
-                if [ $cursor -lt $(( ${#submenu[@]} - 1 )) ]; then
-                  cursor=$((cursor + 1))
-                fi
-                ;;
-              "") # Enter key
-                case "$cursor" in
-                  0) # Create
-				  	#keep_loop=false
-                    selected_option="${submenu[$cursor]}"
-                    process_option "$selected_option"
-                    ;;
-                  1) # Suboption 2
-				  	#keep_loop=false
-                    selected_option="${submenu[$cursor]}"
-                    process_option "$selected_option"
-                    ;;
-                  2) # Back
-                    break
-                    ;;
-                esac
-                ;;
-            esac
-          done
-          ;;
-        3) # Install
-          echo "${RED}Install${NC}"
-          selected_option="${options[$cursor]}"
-          process_option "$selected_option"
-          ;;
-        4) # Exit
-          echo "${RED}Exiting${NC}"
-          exit 0
-          ;;
-        *)
-          ;;
-      esac
-      ;;
-  esac
-
-  # Exit if a root-level option is selected
-  if [ "$cursor" -ge "${#options[@]}" ]; then
-    echo "${RED}Exiting...${NC}"
-    exit 0
-  fi
-done
-
 # Print out the selected options
 echo "Selected Options:"
 for option in "${selected_options[@]}"; do
@@ -1096,21 +1177,25 @@ for option in "${selected_options[@]}"; do
 done
 
 
-#END_INTERACTIVE_MODE
+#===END_INTERACTIVE_MODE===
 
 while test $# -gt 0; do
   case "$1" in
 	-o)
-	interactive_list_tags
-	exit 1;;
-
+	  interactive_list_tags
+	  exit 1
+	  ;;
+	-ia)
+	  interactive_menu
+	  ;;
     -h|--help)
-			print_help
+	  print_help
       ;;
     -a|--alias)
       shift
       if test $# -gt 0; then
         append_src $1 "$2"
+		#TODO: Add a check to see if the alias is correctly placed
         echo $colr "${green}command: ${reset} $2 ${green}is now runnable as alias: ${reset} $1"
       else 
         echo $colr "${red}No alias specified${reset}"
@@ -1119,14 +1204,11 @@ while test $# -gt 0; do
       shift 
       shift
       ;;
-    -e|--exec)
-			shift
-      restart_shell
-      ;;
     -s|--script) 
       shift
       if test $# -gt 0; then
         make_global $1 $2
+		#TODO: add a check in make global (or here) to see is the file is placed and is runnable.
         echo $colr "${green}script: ${reset} $1 ${green}is now runnable as: ${reset} $2"
       else 
         echo $colr "${red}No alias specified${reset}"
@@ -1205,27 +1287,6 @@ while test $# -gt 0; do
       tag $1
       shift 
       ;;
-    -i|--init)
-      shift
-      _setup_package
-      ;;
-		*)
-			if [ $initialised_pak = false ] && [ $skip_install = false ]
-			then 
-				printf '%s ' "${package}${cyan} is not yet initialised, want to do that now?${reset}(y/n)"
-				read answer
-				if [ $answer = 'y' ]
-				then 
-					_setup_package
-					exit 0
-				else
-					break
-				fi
-			else
-				print_help
-				break
-			fi
-			;;
   esac
 done
 
