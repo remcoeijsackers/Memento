@@ -43,6 +43,23 @@ else
 	read_assist="-p"
 fi
 
+check_rc_file() {
+	if [ -f "$1" ]; then
+	    echo "1"
+	else
+	    echo "0"
+	fi
+}
+
+#y="$(check_rc_file $rc_file)"
+#
+#if [ $y -eq 1 ];
+#then
+#    echo "yay $y"
+#else 
+#    echo "no $y"
+#fi
+
 #==INITIAL_RUN===
 
 _initial_run_parser() {
@@ -115,29 +132,25 @@ fi
 
 # make an alias
 append_src() {
-	if [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
-	then
+	y="$(check_rc_file $rc_file)"
+	if [ $y -eq 1 ]
+	then 
 		alname=$1
 		alcomm=$2
-		printf "alias %s='%s' #alias made by $package\n" "$alname" "$alcomm" >> ~/.zshrc
-	elif [ $usedshell = "/bin/bash" ] || [ $usedshell = "bash" ]
-	then
-		alname=$1
-		alcomm=$2
-		printf "alias %s='%s' #alias made by $package\n" "$alname" "$alcomm" >> ~/.bashrc
-	else 
+		printf "alias %s='%s' #alias made by $package\n" "$alname" "$alcomm" >> $rc_file
+	else
 		_list_rc
 	fi
 }
 
 #Make a script globally excecutable
 make_global() {
-	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
-	then
-		rcfile="~/.zshrc"
-	elif  [ $usedshell = "/bin/bash" ] || [ $usedshell = "bash" ]
-	then
-		rcfile="~/.bashrc"
+	y="$(check_rc_file $rc_file)"
+	if [ $y -eq 1 ]
+	then 
+		continue
+	else
+		_list_rc
 	fi
 
 	#rename script for find function
@@ -159,15 +172,16 @@ edit_script() {
 }
 
 list_aliases() {
-	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
-	then
-		grep "alias made by $package" ~/.zshrc
-	elif [ $usedshell = "/bin/bash" ] || [ $usedshell = "bash" ]
-	then
-		grep "alias made by $package" ~/.bashrc 
-	else 
+	y="$(check_rc_file $rc_file)"
+	if [ $y -eq 1 ]
+	then 
+		continue
+	else
 		_list_rc
 	fi
+
+	grep "alias made by $package" $rc_file
+
 }
 
 list_scripts() {
@@ -583,6 +597,7 @@ _change_config_remove_setup_file(){
   		fi
 }
 
+
 _change_shell() {
 	printf '%s ' "${cyan}new default shell: ${reset}"
 	read answer
@@ -590,12 +605,25 @@ _change_shell() {
 	then
 		chsh -s '/bin/zsh'
 		echo "${green}zsh${reset} is the new default shell"
+		echo "rc_file='~/.zshrc'" >> $exp_file
 	elif [ $answer = "bash" ]
 	then
 		chsh -s /bin/bash
 		echo -n $colr "${green}bash${reset} is the new default shell"
+		echo "rc_file='~/.bashrc'" >> $exp_file
 	else 
 		echo $colr "${red}shell not tested, supported shells are: bash, zsh ${reset}"
+		echo "setting shell (chsh -s /bin/$answer)"		
+		chsh -s /bin/$answer
+		echo -n $colr "${green}$answer${reset} is the new default shell"
+		echo "assuming rc file (~/.${answer}rc)"
+		if [ -f "~/.${answer}rc" ]; then
+        	echo "rc_file='~/.${answer}rc'" >> $exp_file
+    	else
+			printf '%s ' "${cyan}Please enter the rc file path (i.e. ~/.zshrc) for your shell: ${reset}"
+			read custom_rc
+			echo "rc_file='$custom_rc}'" >> $exp_file
+		fi
 	fi
 }
 
