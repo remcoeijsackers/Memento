@@ -708,7 +708,6 @@ _change_config_shell() {
         	esac
 		}
 
-		#echo "rc_file=$(_shell_to_rc $usedshell)"
 	  	arg1="$1"
 
   		if [ -z "$arg1" ]; then
@@ -721,6 +720,7 @@ _change_config_shell() {
   		fi
 
 }
+
 
 _change_config_script_dir() {
 		__manual_config() {
@@ -744,6 +744,7 @@ _change_config_script_dir() {
   		fi
 }
 
+
 _change_config_restart_default() {
 		__manual_config() {
 			echo $colr "${cyan}Do you want to restart the shell (exec shell) after each command?${reset}"
@@ -764,6 +765,7 @@ _change_config_restart_default() {
 			echo "restart_default=false" >> $exp_file
   		fi
 }
+
 
 _change_config_default_editor() {
 		__manual_config() {
@@ -787,6 +789,7 @@ _change_config_default_editor() {
   		fi
 
 }
+
 
 _change_config_command_name() {
 		__manual_config() {
@@ -812,6 +815,7 @@ _change_config_command_name() {
 			echo "callsign='mto'" >> $exp_file
   		fi
 }
+
 
 _change_config_remove_setup_file(){
 		__manual_config() {
@@ -877,34 +881,36 @@ _change_shell() {
 	fi
 }
 
+
 __check_everything_placed() {
 	configuration="$(head -10 $exp_file)"
 
 	for i in ${configuration[@]}
-				do
-			   	case "$i" in
-            		"initialised_pak")
-						echo "$i=done"
-						;;
-            		"restart_default")
-						echo "$i=done"
-						;;
-            		"script_dir")
-						echo "$i=done"
-						;;
-            		"callsign")
-						echo "$i=done"
-						;;
-            		"default_editor")
-						echo "$i=done"
-						;;
-            		"rc_file")
-						echo "$i=done"
-						;;
-            		"default_shell")
-						echo "$i=done"
-						;;
-        		esac
+	do
+		echo "$i"
+		case "$i" in
+        	"initialised_pak")
+				echo "$i=done"
+				;;
+        	"restart_default")
+				echo "$i=done"
+				;;
+        	"script_dir")
+				echo "$i=done"
+				;;
+        	"callsign")
+				echo "$i=done"
+				;;
+        	"default_editor")
+				echo "$i=done"
+				;;
+        	"rc_file")
+				echo "$i=done"
+				;;
+        	"default_shell")
+				echo "$i=done"
+				;;
+        esac
 	done
 	#check_content initialised_pak
 	#check_content restart_default
@@ -917,9 +923,12 @@ __check_everything_placed() {
 
 _setup_complete() {
 	command_named_param=$1
+
 	if $demo_mode
 	then 
-		echo "demo mode, skipping move and permission adding of $exp_file"
+		echo "done: demo mode, skipping move and permission adding of $exp_file"
+		echo "results:"
+		__check_everything_placed
 	else
 		echo "done, results"
 		__check_everything_placed
@@ -1040,11 +1049,20 @@ _change_config() {
 if [ $# -eq 0 ] ; then
     if [ $initialised_pak = false ] && [ $skip_install = false ]
 		then 
-			echo $colr "${cyan}${package} is not yet initialised, want to do that now?${reset} ?" 
-			echo "Note: A trial (non destructive) run can be started with\n./setup.sh --demo --skipinstall"
+			echo 
+			echo "${red}Hi There !${reset}"
+			echo "If you want to test ${red}$package${reset} first, you can rerun the script to:"
+			echo
+			echo "* Test in interactive mode with:\n ${green}./$filename ${red} -ia${cyan} --demo --skipinstall ${reset}"
+			echo "* Test a command:\n ${green}./$filename ${red}<command>${cyan} --demo --skipinstall ${reset}\n use ${red}-h${reset}|${red}--help${reset} to see the available commands."
+			echo
+			echo "The ${cyan}--demo${reset} flag will make the program 'non destructive',\nskipping the steps of moving files and adding permissions."
+			echo
+			echo $colr "${cyan}${package} is ${red}not yet initialised${cyan}, want to do that now ?${reset}" 
+			echo 
 			printf '%s ' '(y/n)'
 			read answer
-			if [ $answer = 'y' ]
+			if [ $answer = 'y' ] || [ $answr = 'Y' ]
 				then 
 					chmod +x $filename
 					_setup_package
