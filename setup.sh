@@ -3,7 +3,8 @@ restart_default=false
 script_dir='/Users/remcoeijsackers/codebin/scripts/source/'
 callsign='mto'
 default_editor='vim'
-rc_file=~/.zshrc #TODO: Replace during the init setup
+rc_file='~/.zshrc'
+default_shell='zsh'
 
 
 
@@ -43,6 +44,17 @@ else
 	read_assist="-p"
 fi
 
+#===CHECKS===
+
+text_exists() {
+	if grep -Fxq "$1" $rc_file
+	then
+	    echo "1"
+	else
+	   	echo "0"
+	fi
+}
+
 dir_exits() {
 	if [ -d "$1" ]; then
   		echo "1"
@@ -50,6 +62,7 @@ dir_exits() {
 		echo "0"
 	fi
 }
+
 file_exists() {
 	if [ -f "$1" ]; then
 	    echo "1"
@@ -57,7 +70,10 @@ file_exists() {
 	    echo "0"
 	fi
 }
-#==INITIAL_RUN===
+
+#===END_CHECKS===
+
+#===INITIAL_RUN===
 
 _initial_run_parser() {
 	intial_run_optional_args=( "--demo" "--ia" "--skipinstall" )
@@ -158,7 +174,7 @@ make_global() {
 	mv $PWD/"${new_scriptname}" $script_dir/
 	chmod +x $script_dir/"${new_scriptname}"
 	# add alias for script
-	echo "alias $2='${new_scriptname}' #alias made by $package" >> ~/.zshrc
+	echo "alias $2='${new_scriptname}' #alias made by $package" >> $rc_file
 }
 
 edit_script() {
@@ -200,70 +216,62 @@ list_scripts() {
 }
 
 list_tags() {
-	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
-	then
-		grep "tag" ~/.zshrc
-	elif  [ $usedshell = "/bin/bash" ] ||  [ $usedshell = "bash" ]
-	then
-		grep "tag" ~/.bashrc 
-	else 
+	y="$(file_exists $rc_file)"
+	if [ $y -eq 1 ]
+	then 
+		grep "tag" $rc_file
+	else
 		_list_rc
 	fi
 }
 
 remove_all_tags() {
-  if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
-	then
-    sed "/tag/d" ~/.zshrc > temp
-		echo "" > ~/.zshrc
-		cat temp > ~/.zshrc
+	y="$(file_exists $rc_file)"
+	if [ $y -eq 1 ]
+	then 
+    	sed "/tag/d" $rc_file > temp
+		echo "" > $rc_file
+		cat temp > $rc_file
 		rm temp
-	elif  [ $usedshell = "/bin/bash" ] || [ $usedshell == "bash" ]
-	then
-		sed "/tag/d" ~/.bashrc > temp
-		echo "" > ~/.bashrc
-		cat temp > ~/.bashrc
-		rm temp
-	else 
+	else
 		_list_rc
 	fi
 }
 
 remove_script() {
-	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
-	then
+	y="$(file_exists $rc_file)"
+	if [ $y -eq 1 ]
+	then 
 		rm "$script_dir/$1"
-		al=$(grep $1 ~/.zshrc)
+		al=$(grep $1 $rc_file)
 		remove_alias $1
-	elif  [ $usedshell = "/bin/bash" ] ||  [ $usedshell = "bash" ]
-	then
-		rm "$script_dir/$1"
-		al=$(grep $1 ~/.bashrc)
-		remove_alias $1
-	else 
+	else
 		_list_rc
 	fi
-	echo $colr "${green}Removed script${reset}: $1"
-	echo $colr "${green}Removed bound alias${reset}: $al"
+	echo $colr "Removed script: ${green} $1 ${reset}"
+	echo $colr "Removed alias: ${green} $al ${reset}"
 }
 
 remove_alias() {
-	#TODO add a check to see if the alias is already removed
-	if  [ $usedshell = "/bin/zsh" ] || [ $usedshell = "sh" ] || [ $usedshell = "zsh" ] || [ $usedshell = "/bin/sh" ]
-	then
-		sed "/$1/d" ~/.zshrc > temp
-		echo "" > ~/.zshrc
-		cat temp > ~/.zshrc
+	remove_specific_alias() {
+		sed "/$1/d" $rc_file > temp
+		echo "" > $rc_file
+		cat temp > $rc_file
 		rm temp
-	elif  [ $usedshell = "/bin/bash" ] || [ $usedshell = "bash" ]
-	then
-		sed "/alias $1/d" ~/.bashrc > temp
-		echo "" > ~/.bashrc
-		cat temp > ~/.bashrc
-		rm temp
-	else 
+	}
+
+	y="$(file_exists $rc_file)"
+	if [ $y -eq 1 ]
+	then 
+		t="$(text_exists $1)"
+		if [ $t -eq 1 ]
+		then
+			remove_specific_alias $1
+		fi
+	else
 		_list_rc
 	fi
+
 }
 
 remove_all_alias() {
@@ -315,7 +323,7 @@ restart_shell() {
 }
 
 tag() {
-  file_path=~/.zshrc  # Replace with the path to your file
+  file_path=$rc_file
   # Read the file contents into an array
   array=()
   while IFS= read -r line || [ -n "$line" ]; do
@@ -601,30 +609,6 @@ interactive_list_aliases() {
 
 #===END_FUNCTIONS===
 
-#===SETUP_RUN_CHECK===
-if [[ $# -eq 0 ]] ; then
-    if [ $initialised_pak = false ] && [ $skip_install = false ]
-		then 
-			echo $colr "${cyan}${package} is not yet initialised, want to do that now?${reset} ?" 
-			echo "Note: A trial (non destructive) run can be started with\n./setup.sh --demo --skipinstall"
-			printf '%s ' '(y/n)'
-			read answer
-			if [ $answer = 'y' ]
-				then 
-					chmod +x $filename
-					_setup_package
-					exit 0
-				else
-					exit 0
-				fi
-		else
-			print_help
-			break
-		fi
-    exit 0
-fi
-#===END_SETUP_RUN_CHECK===
-
 # random script generator, to be used for tests
 _gen() {
 	num=$(( ( RANDOM % 10 )  + 1 ))
@@ -659,7 +643,7 @@ _start_setup() {
 		  printf "\n"
 		  echo "${cyan}The default settings:${reset}"
 		  printf "\n"
-  		  print_row "${cyan}default shell is:${reset}        			" "$usedshell"
+  		  print_row "${cyan}default shell is:${reset}        			" "$usedshell ($default_shell)"
   		  print_row "${cyan}Script directory:${reset}        			" "$script_dir"
   		  print_row "${cyan}Shell restart is:${reset}		 		" "$restart_default"
   		  print_row "${cyan}Remove${reset} $filename${cyan} after setup:${reset}			" "False"
@@ -688,6 +672,8 @@ _initialise_package() {
 	echo "initialised_pak=true" >> $exp_file
 	echo "callsign='$callsign'" >> $exp_file
 	echo "default_editor=$default_editor" >> $exp_file
+	echo "rc_file=$rc_file" >> $exp_file
+	echo "default_shell=$default_shell" >> $exp_file
 	tail -n +20 $filename >> $exp_file
 
 	_setup_complete $callsign
@@ -709,12 +695,29 @@ _change_config_shell() {
 				exit 0
 			fi
 		}
+		_shell_to_rc() {
+			case "$1" in
+            	zsh) 
+					echo "~/.zshrc"
+					break
+					;;
+            	bash)
+            	    echo "~/.bashrc"
+					break
+					;;
+        	esac
+		}
+
+		#echo "rc_file=$(_shell_to_rc $usedshell)"
 	  	arg1="$1"
+
   		if [ -z "$arg1" ]; then
   		  arg1=""
 		  __manual_config
 		else
-			echo "#!/bin/$usedshell" >> $exp_file
+			echo "#!/bin/$default_shell" >> $exp_file
+			chsh -s "/bin/$default_shell"
+			echo "rc_file=$(_shell_to_rc $default_shell)" >> $exp_file
   		fi
 
 }
@@ -835,32 +838,81 @@ _change_config_remove_setup_file(){
 
 
 _change_shell() {
-	printf '%s ' "${cyan}new default shell: ${reset}"
-	read answer
-	if [ $answer = "zsh" ]
-	then
-		chsh -s '/bin/zsh'
-		echo "${green}zsh${reset} is the new default shell"
-		echo "rc_file='~/.zshrc'" >> $exp_file
-	elif [ $answer = "bash" ]
-	then
-		chsh -s /bin/bash
-		echo -n $colr "${green}bash${reset} is the new default shell"
-		echo "rc_file='~/.bashrc'" >> $exp_file
-	else 
+	enter_rc_manually() {
 		echo $colr "${red}shell not tested, supported shells are: bash, zsh ${reset}"
 		echo "setting shell (chsh -s /bin/$answer)"		
 		chsh -s /bin/$answer
 		echo -n $colr "${green}$answer${reset} is the new default shell"
 		echo "assuming rc file (~/.${answer}rc)"
 		if [ -f "~/.${answer}rc" ]; then
-        	echo "rc_file='~/.${answer}rc'" >> $exp_file
+        	echo "rc_file=~/.${answer}rc" >> $exp_file
     	else
 			printf '%s ' "${cyan}Please enter the rc file path (i.e. ~/.zshrc) for your shell: ${reset}"
 			read custom_rc
-			echo "rc_file='$custom_rc}'" >> $exp_file
+			echo "rc_file=$custom_rc" >> $exp_file
 		fi
+	}
+	_shell_to_rc() {
+			case "$1" in
+            	zsh) 
+					echo "~/.zshrc"
+					break
+					;;
+            	bash)
+            	    echo "~/.bashrc"
+					break
+					;;
+        	esac
+	}
+	printf '%s ' "${cyan}new default shell: ${reset}"
+	read answer
+	echo "answer is $(_shell_to_rc $answer)"
+	if [ $answer = "zsh" ] || [ $answer = "bash" ]
+	then
+		chsh -s "/bin/$answer"
+		echo "${green} $answer ${reset} is the new default shell"
+		echo "rc_file=$(_shell_to_rc $answer)" >> $exp_file
+	else
+		enter_rc_manually
 	fi
+}
+
+__check_everything_placed() {
+	configuration="$(head -10 $exp_file)"
+
+	for i in ${configuration[@]}
+				do
+			   	case "$i" in
+            		"initialised_pak")
+						echo "$i=done"
+						;;
+            		"restart_default")
+						echo "$i=done"
+						;;
+            		"script_dir")
+						echo "$i=done"
+						;;
+            		"callsign")
+						echo "$i=done"
+						;;
+            		"default_editor")
+						echo "$i=done"
+						;;
+            		"rc_file")
+						echo "$i=done"
+						;;
+            		"default_shell")
+						echo "$i=done"
+						;;
+        		esac
+	done
+	#check_content initialised_pak
+	#check_content restart_default
+	#check_content script_dir
+	#check_content callsign
+	#check_content default_editor
+	#check_content rc_file
+	#check_content default_shell
 }
 
 _setup_complete() {
@@ -869,6 +921,11 @@ _setup_complete() {
 	then 
 		echo "demo mode, skipping move and permission adding of $exp_file"
 	else
+		echo "done, results"
+		__check_everything_placed
+
+		exit 0
+
 		make_global $exp_file $command_named_param
 		echo $colr "${green}${package}${reset} is initialised. use ${green}'$command_named_param'${reset}  to call it."
 		
@@ -879,7 +936,7 @@ _setup_complete() {
 }
 
 _change_config() {
-		echo "Memento" >> $exp_file
+		echo "#Memento" >> $exp_file
 
 		config_options=( "shell" "script_dir" "restart" "editor" "setup_file" "done" )
 		configured_parts=("done")
@@ -978,6 +1035,30 @@ _change_config() {
 
 #===END_SETUP===
 
+
+#===SETUP_RUN_CHECK===
+if [ $# -eq 0 ] ; then
+    if [ $initialised_pak = false ] && [ $skip_install = false ]
+		then 
+			echo $colr "${cyan}${package} is not yet initialised, want to do that now?${reset} ?" 
+			echo "Note: A trial (non destructive) run can be started with\n./setup.sh --demo --skipinstall"
+			printf '%s ' '(y/n)'
+			read answer
+			if [ $answer = 'y' ]
+				then 
+					chmod +x $filename
+					_setup_package
+					exit 0
+				else
+					exit 0
+				fi
+		else
+			print_help
+			break
+		fi
+    exit 0
+fi
+#===END_SETUP_RUN_CHECK===
 
 #===INTERACTIVE_MODE===
 
