@@ -13,6 +13,30 @@ chmod +x setup.sh && ./setup.sh
 
 ## Usage
 
+*demo mode*
+
+If you want to test Memento first, run the script like so:
+
+* Test in interactive mode with:
+ ./setup.sh  -ia --demo --skipinstall 
+* Test a command:
+ ./setup.sh <command> --demo --skipinstall 
+ use -h|--help to see the available commands.
+
+
+### Commands
+
+*Interactive mode*
+
+![interactive mode](interactive_mto.jpg)
+
+Start an interactive Memento session, with easy access to all scripts, tags, aliases.
+
+```shell
+mto -ia
+```
+
+
 *List all tags, aliases, scripts*
 
 this will print an overview of all items managed within memento to stdout. 
