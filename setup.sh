@@ -1,9 +1,9 @@
 initialised_pak=false
 restart_default=false
-script_dir='/Users/remcoeijsackers/codebin/scripts/source/'
+script_dir='/usr/local/bin'
 callsign='mto'
 default_editor='vim'
-rc_file='~/.zshrc'
+rc_file=~/.zshrc
 default_shell='zsh'
 
 
@@ -18,8 +18,8 @@ default_shell='zsh'
 
 
 
-#'''Change code only below this point============'''
-#'''The first 20 lines are checked during setup=='''
+# Change code only below this point.
+# The first 20 lines are checked during setup.
 # MEMENTO
 
 red=`tput setaf 1`
@@ -29,7 +29,7 @@ reset=`tput sgr0`
 
 package='Memento'
 usedshell=$(ps -p $$ -ocomm=)
-extention="mto"
+extention="_mto_"
 filename=`basename "$0"`
 exp_file="memento.sh"
 count_of_tags=""
@@ -139,6 +139,10 @@ _initial_run_parser() {
 if [ $initialised_pak = false ]
 then
 	_initial_run_parser $@
+else
+	demo_mode=false
+	skip_install=false
+	interactive_mode=false
 fi
 
 #===FUNCTIONS===
@@ -160,21 +164,28 @@ append_src() {
 make_global() {
 	y="$(file_exists $rc_file)"
 	if [ $y -eq "1" ]
-	then 
-		continue
+	then
+		echo
 	else
 		_list_rc
 	fi
 
-
-	#rename script for find function
+	# rename script for find function
 	new_scriptname="$extention$1"
 	mv $1 "${new_scriptname}"
 	#move scripts to bin
 	mv $PWD/"${new_scriptname}" $script_dir/
-	chmod +x $script_dir/"${new_scriptname}"
-	# add alias for script
-	echo "alias $2='${new_scriptname}' #alias made by $package" >> $rc_file
+
+	f="$(file_exists $script_dir/${new_scriptname})"
+	if [ $f -eq "1" ]
+	then 
+		chmod +x $script_dir/"${new_scriptname}"
+		# add alias for script
+		echo "alias $2='${new_scriptname}' #script made by $package" >> $rc_file
+	else
+		echo ${red} script not found in: $script_dir/"${new_scriptname}"  ${reset}
+		echo "Please check config."
+	fi
 }
 
 edit_script() {
@@ -203,7 +214,7 @@ list_scripts() {
 	y="$(dir_exits $script_dir)"
 	if [ $y -eq 1 ]
 	then
-		scripts="$(find $script_dir -name "_${extention}_*")"
+		scripts="$(find $script_dir -name "${extention}*")"
 		if $scripts
 		then
 			echo $scripts
@@ -228,7 +239,7 @@ list_tags() {
 remove_all_tags() {
 	y="$(file_exists $rc_file)"
 	if [ $y -eq 1 ]
-	then 
+	then
     	sed "/tag/d" $rc_file > temp
 		echo "" > $rc_file
 		cat temp > $rc_file
@@ -239,6 +250,7 @@ remove_all_tags() {
 }
 
 remove_script() {
+	#TODO: Also remove the _mto_scriptname file, ask for confirmation
 	y="$(file_exists $rc_file)"
 	if [ $y -eq 1 ]
 	then 
@@ -275,7 +287,8 @@ remove_alias() {
 }
 
 remove_all_alias() {
-	#TODO add a check to see if the alias is already removed
+	#TODO: add a check to see if the alias is already removed
+	#TODO: add a automatic mode for during global uninstall
 	printf '%s ' 'Are you sure you want to remove ALL aliases? (y/n) '
 	read answer
 	if [ $answer = "y" ]
@@ -366,6 +379,7 @@ _remove_memento() {
 	remove_script _mto_memento.sh
 	find $script_dir/  -maxdepth 1 -name '_mto_memento.sh' 
 	remove_alias '_mto_memento.sh'
+	remove_all_tags
 	echo $colr "${cyan} ${package} is removed${reset}"
 	restart_shell
 }
@@ -499,6 +513,7 @@ interactive_list_tags() {
 	fi
 
 	echo $colr "${cyan}${package} Tags ${reset}" 
+	echo $colr "${cyan}Select one to navigate${reset}" 
 	select_option "${array[@]}"
 	choice=$?
 
@@ -529,9 +544,7 @@ interactive_list_tags() {
 	}
 
 	result=$(get_value_after_space "${command%?}")
-	#echo "result is $result"
 	cd $result
-	#echo $PWD
 }
 
 
@@ -541,16 +554,86 @@ interactive_script_maker() {
 
 	# Store the files in an array
 	file_array=($files)
+	echo $colr "${cyan}Select a file${reset}"
+	select_option "${file_array[@]}"
+	choice=$?
+
+	script="${file_array[$choice]}"
+
+	echo $colr "${cyan}Please enter script alias: ${reset}" 
+	printf '%s '
+	read alias
+	make_global $script $alias
+	exit 0
+}
+
+interactive_list_scripts_edit() {
+	# Get all the files in the current working directory
+	files=$(ls -1 $script_dir)
+
+	# Store the files in an array
+	file_array=($files)
 
 	select_option "${file_array[@]}"
 	choice=$?
 
 	script="${file_array[$choice]}"
 
-	echo $colr "${cyan}${package}Please enter script alias: ${reset}" 
-	printf '%s '
-	read alias
-	make_global $script $alias
+	echo $colr "${cyan}${script }${reset}" 
+	exit 0
+}
+
+interactive_list_scripts_in_rc() {
+	y="$(file_exists $rc_file)"
+	if [ $y -eq 1 ]
+	then 
+		echo
+	else
+		_list_rc
+	fi
+
+	file_path=$rc_file
+
+	# Read the file contents into an array
+	array=()
+	while IFS= read -r line || [ -n "$line" ]; do
+	    if [ "${line%#script made by Memento}" != "$line" ]; then
+	        alias_line=$(echo "$line" | sed -E "s/alias ([^=]+)='([^']+)' #script made by Memento/\1='\2'/")
+	        array+=("$alias_line")
+	    fi
+	done < "$file_path"
+	
+	scripts_count="${#array[@]}"
+	if [ $scripts_count -lt 1 ]
+	then
+		echo $colr "No scripts found in $rc_file"
+		exit 0
+	fi
+	echo $colr "${cyan}${package} Scripts ${reset}" 
+	echo
+	select_option "${array[@]}"
+	choice=$?
+
+	val=${array[$choice]}
+
+	string_before_equal="${val%%=*}"
+
+	get_part_before_equal() {
+	  local input="$1"
+	  IFS="=" read -ra parts <<< "$input"
+	  if [ "${#parts[@]}" -lt 2 ]; then
+	    echo "Invalid input. '=' not found."
+	  else
+	    echo "${parts[0]}"
+	  fi
+	}
+
+	command=$(get_part_before_equal "$val")
+	echo "$command"
+
+	#carry out the alias (make sure its sourced correctly)
+	$command
+
 }
 
 interactive_list_aliases() {
@@ -598,11 +681,21 @@ interactive_list_aliases() {
 	}
 
 	command=$(get_part_before_equal "$val")
-	echo "result is $command"
 
 	#carry out the alias (make sure its sourced correctly)
 	$command
 
+}
+
+list_mto_rc_file() {
+      echo $colr "${green} Scripts:${reset}"
+      list_scripts
+      echo " "
+      echo $colr "${green} Aliases:${reset}"
+      list_aliases
+      echo " "
+      echo $colr "${green} Tags:${reset}"
+      list_tags
 }
 
 
@@ -646,7 +739,7 @@ _start_setup() {
   		  print_row "${cyan}default shell is:${reset}        			" "$usedshell ($default_shell)"
   		  print_row "${cyan}Script directory:${reset}        			" "$script_dir"
   		  print_row "${cyan}Shell restart is:${reset}		 		" "$restart_default"
-  		  print_row "${cyan}Remove${reset} $filename${cyan} after setup:${reset}			" "False"
+  		  print_row "${cyan}Remove${reset} $filename${cyan} after setup:${reset}			" "false"
   		  print_row "${cyan}The editor is${reset}				    	" "$default_editor${reset}."
   		  print_row "${cyan}The command name for ${reset}${package} ${cyan}is${reset}		" "$callsign"
   		  printf "\n"
@@ -884,41 +977,36 @@ _change_shell() {
 
 __check_everything_placed() {
 	configuration="$(head -10 $exp_file)"
-
-	for i in ${configuration[@]}
-	do
-		echo "$i"
-		case "$i" in
-        	"initialised_pak")
-				echo "$i=done"
-				;;
-        	"restart_default")
-				echo "$i=done"
-				;;
-        	"script_dir")
-				echo "$i=done"
-				;;
-        	"callsign")
-				echo "$i=done"
-				;;
-        	"default_editor")
-				echo "$i=done"
-				;;
-        	"rc_file")
-				echo "$i=done"
-				;;
-        	"default_shell")
-				echo "$i=done"
-				;;
-        esac
-	done
-	#check_content initialised_pak
-	#check_content restart_default
-	#check_content script_dir
-	#check_content callsign
-	#check_content default_editor
-	#check_content rc_file
-	#check_content default_shell
+	check_config(){
+		for i in ${configuration[@]}
+		do
+			echo "$i"
+			case "$i" in
+    	    	"initialised_pak")
+					echo "$i=done"
+					;;
+    	    	"restart_default")
+					echo "$i=done"
+					;;
+    	    	"script_dir")
+					echo "$i=done"
+					;;
+    	    	"callsign")
+					echo "$i=done"
+					;;
+    	    	"default_editor")
+					echo "$i=done"
+					;;
+    	    	"rc_file")
+					echo "$i=done"
+					;;
+    	    	"default_shell")
+					echo "$i=done"
+					;;
+    	    esac
+		done
+	}
+	# check_config
 }
 
 _setup_complete() {
@@ -927,13 +1015,11 @@ _setup_complete() {
 	if $demo_mode
 	then 
 		echo "done: demo mode, skipping move and permission adding of $exp_file"
-		echo "results:"
-		__check_everything_placed
+		#echo "results:"
+		#__check_everything_placed
 	else
-		echo "done, results"
-		__check_everything_placed
-
-		exit 0
+		#echo "done, results"
+		#__check_everything_placed
 
 		make_global $exp_file $command_named_param
 		echo $colr "${green}${package}${reset} is initialised. use ${green}'$command_named_param'${reset}  to call it."
@@ -1062,7 +1148,7 @@ if [ $# -eq 0 ] ; then
 			echo 
 			printf '%s ' '(y/n)'
 			read answer
-			if [ $answer = 'y' ] || [ $answr = 'Y' ]
+			if [ $answer = 'y' ] || [ $answer = 'Y' ]
 				then 
 					chmod +x $filename
 					_setup_package
@@ -1082,11 +1168,11 @@ fi
 
 interactive_menu() {
 	# Define menu options with corresponding values
-	options=("Help" "Tags" "Script" "Aliases" "Exit")
-	values=("value1" "value2" "submenu1" "aliases" "exit")
+	options=("Help" "Tags" "Script" "Aliases" "List_rc" "Exit")
+	values=("help" "tags" "script" "aliases" "List_rc" "exit")
 	# Define submenu options with corresponding values
-	submenu=("Create" "List" "Back")
-	submenu_values=("create" "list" "back")
+	submenu=("Create_script" "List_scripts" "Back")
+	submenu_values=("create_script" "list_scripts" "back")
 
 	# Set initial cursor position
 	cursor=0
@@ -1115,6 +1201,7 @@ interactive_menu() {
 	  clear
 	  echo "${BLUE}*********************************************"
 	  echo "                 Memento $demo_mode_text"
+	  echo "Scope: $PWD"
 	  echo "*********************************************${NC}"
 
 		  for ((i=0; i<${#options[@]}; i++)); do
@@ -1145,26 +1232,20 @@ interactive_menu() {
 	# Function to process selected option
 	process_option() {
 	  selected_option=$1
-	  echo "Processing option: $selected_option"
-
-	  # Example: Call another function based on the selected option
 	  case "$selected_option" in
 	    "Help")
 	      echo "${GREEN}Calling function for Option 1${NC}"
 		  print_help
-	      # Call your function for Option 1 here
 	      ;;
 	    "Script")
-	      echo "${GREEN}Calling function for Option 2${NC}"
-	      # Call your function for Option 2 here
+	      # Handled in the while loop below.
 	      ;;
-	    "List")
-	      echo "${GREEN}Calling function for $selected_option ${submenu_values[$cursor]} ${NC}"
-	      # Call your function for Suboption 1 here
+	    "List_scripts")
+	      interactive_list_scripts_in_rc
 	      ;;
-	    "Create")
-	      echo "${GREEN}Calling function for $selected_option ${submenu_values[$cursor]} ${NC}"
+	    "Create_script")
 		  interactive_script_maker
+		  exit 0
 	      ;;
 		"Tags")
 		  interactive_list_tags
@@ -1172,8 +1253,12 @@ interactive_menu() {
 		"Aliases")
 		  interactive_list_aliases
 	      ;;
+		"List_rc")
+		  list_mto_rc_file
+		  ;;
 		"Exit")
-			exit 0;;
+			exit 0
+			;;
 		*)
 		echo "Unkown option"
 		exit 0
@@ -1235,10 +1320,12 @@ interactive_menu() {
 	                  0) # Create
 	                    selected_option="${submenu[$cursor]}"
 	                    process_option "$selected_option"
+						break
 	                    ;;
 	                  1) # List
 	                    selected_option="${submenu[$cursor]}"
 	                    process_option "$selected_option"
+						break
 	                    ;;
 	                  2) # Back
 	                    break
@@ -1252,7 +1339,11 @@ interactive_menu() {
 	          selected_option="${options[$cursor]}"
 	          process_option "$selected_option"
 	          ;;
-	        4) # Exit
+	        4) # list rc
+	          selected_option="${options[$cursor]}"
+	          process_option "$selected_option"
+	          ;;
+	        5) # Exit
 	          echo "${RED}Exiting${NC}"
 	          exit 0
 	          ;;
@@ -1269,13 +1360,6 @@ interactive_menu() {
 	  fi
 	done
 }
-# Print out the selected options
-echo "Selected Options:"
-for option in "${selected_options[@]}"; do
-  echo "$option"
-done
-
-
 #===END_INTERACTIVE_MODE===
 
 while test $# -gt 0; do
@@ -1307,10 +1391,9 @@ while test $# -gt 0; do
       shift
       if test $# -gt 0; then
         make_global $1 $2
-		#TODO: add a check in make global (or here) to see is the file is placed and is runnable.
         echo $colr "${green}script: ${reset} $1 ${green}is now runnable as: ${reset} $2"
       else 
-        echo $colr "${red}No alias specified${reset}"
+        echo $colr "${red}No alias specified${reset} (input: script alias)"
         exit 1
       fi
       shift 
@@ -1343,7 +1426,7 @@ while test $# -gt 0; do
       ;;
     -rs|--remove-script)
       shift
-			#NOTE: Output is handled in the function itself.
+	  #NOTE: Output is handled in the function itself.
       remove_script $1
       shift 
       ;;
@@ -1354,14 +1437,7 @@ while test $# -gt 0; do
       ;;
     -ls|--list)
       shift
-      echo $colr "${green} Scripts:${reset}"
-      list_scripts
-      echo " "
-      echo $colr "${green} Aliases:${reset}"
-      list_aliases
-      echo " "
-      echo $colr "${green} Tags:${reset}"
-      list_tags
+	  list_mto_rc_file
       ;;
     -gen)
       shift
