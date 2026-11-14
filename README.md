@@ -9,11 +9,13 @@ takes a word instead of a path.
 ```sh
 mto tag website        # tag the current directory
 website                # …and jump back to it from anywhere
-mto go web             # part of the name is enough
+website src            # or straight into a folder inside it
+Ctrl-G                 # from any prompt: pick a tag or recent directory, with a live preview
 mto z hand             # jump to ~/code/api/handlers: Memento remembers where you've been
+mto tags               # your projects with their git branch and uncommitted changes
+mto stats              # where you actually spend your time
 mto alias gs 'git status --short'   # works immediately, in every open terminal
 mto script add deploy.sh            # now "deploy" runs from anywhere
-mto                    # interactive menu for all of the above
 ```
 
 Works in **bash** (3.2 and newer, so also the macOS default) and **zsh**. It is one script with
@@ -38,15 +40,28 @@ This puts `mto` in `~/.local/bin` (override with `PREFIX=…`) and adds one line
 **Just want to look around first?** `./bin/mto demo` opens a throwaway shell with sample tags,
 aliases and a script. Nothing is installed, and everything is deleted when you type `exit`.
 
+## Ctrl-G: jump from anywhere
+
+Press **Ctrl-G** at any prompt to get one list of your tags (★) and recently visited directories.
+Type to filter, press enter, and you're there. With fzf installed, a preview pane shows what's
+inside each folder, its git branch, whether it has uncommitted changes, and its last commit.
+
+In zsh, whatever you were typing stays on the command line. In bash (4+), a half-typed command is
+saved to your history first, so arrow-up brings it back. To use another key, set `MEMENTO_KEY`
+before the `mto init` line (zsh: `MEMENTO_KEY='^O'`, bash: `MEMENTO_KEY='\C-o'`). Set it to an
+empty value to turn the key off.
+
 ## Tags: name a directory once, jump there forever
 
 ```sh
 cd ~/code/clients/acme/website
 mto tag acme            # or just "mto tag" for automatic names: t1, t2, …
 acme                    # every tag is a command
+acme src components     # …that also takes you into folders inside it (same as: mto go acme/src/components)
 mto go ac               # exact name, unique prefix or any part of the name or folder
-mto go                  # pick from a list
-mto tags                # list them (broken ones are marked "missing")
+mto go                  # pick from tags and recent directories (same as Ctrl-G)
+mto tags                # list them with git branch and changes (broken ones are marked "missing")
+mto open acme           # open in VS Code (or Finder / xdg-open; choose with MEMENTO_OPEN or: mto open acme cursor)
 mto tag acme ~/elsewhere   # move a tag
 mto rename acme acme-web
 mto untag acme | mto untag --missing | mto untag --all
@@ -68,6 +83,22 @@ mto recent          # list them
 ```
 
 `mto go` falls back to this when no tag matches. Set `MEMENTO_NO_HISTORY=1` to turn recording off.
+
+## stats: where does your time go?
+
+```
+$ mto stats
+Where you spend your time
+
+  ★ website             5  ████████████████████████████  ~/projects/website
+    src                 4  ██████████████████████        ~/projects/website/src
+  ★ api                 3  ████████████████              ~/projects/api
+    handlers            2  ███████████                   ~/projects/api/handlers
+
+  16 visits to 6 directories · 3 tags · 2 aliases · 1 script
+
+  Not visited in 30 days: old-client  (mto untag <name> to clean up)
+```
 
 ## Aliases
 
@@ -97,7 +128,8 @@ mto script rm cleanup
 
 Run `mto` without arguments to jump to a tag or recent directory, run an alias or script, edit a
 script, tag the current directory or add an alias. Type to filter, use the arrow keys (or ctrl-n
-and ctrl-p), then press enter. Esc or ctrl-c cancels. With fzf installed you get fuzzy search.
+and ctrl-p), then press enter. Esc or ctrl-c cancels. With fzf installed you get fuzzy search and
+a preview pane (folder contents and git info, alias commands, script source).
 
 ## Everything else
 
@@ -130,8 +162,10 @@ The old flags still work: `mto -t`, `-a`, `-s`, `-ls`, `-ia`, `-ra`, `-rta` and 
   `name<TAB>value` files, `scripts/` holds your scripts, and `history` holds visited directories.
 - Your rc file only gets `eval "$(mto init zsh)"`. That defines a small `mto` shell function
   (a separate program can't change your shell's directory, but a function can), defines an alias
-  per tag and alias, puts `scripts/` on your PATH, and adds a prompt hook. The hook reloads changes
-  made in other terminals and records directories for `mto z`.
+  per tag and alias, puts `scripts/` on your PATH, binds Ctrl-G, and adds a prompt hook. The hook
+  reloads changes made in other terminals and records directories for `mto z`.
+- Git info is read on the fly with plain `git` commands. Set `MEMENTO_NO_GIT=1` if a huge repo
+  makes listings slow.
 - Nothing is ever written to your rc file except that one marked block.
 
 ## Development
