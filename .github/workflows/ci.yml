@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck -s bash bin/mto install.sh
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install test tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y zsh fzf
+      - name: Install test tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install fzf
+      - name: Install bats and pexpect
+        run: |
+          npm install -g bats
+          python3 -m pip install --user pexpect 2>/dev/null || python3 -m pip install --break-system-packages pexpect
+      - name: Tests (bash ${{ runner.os == 'macOS' && '+ zsh' || '5 + zsh' }})
+        run: bats tests/
+      - name: Tests with macOS' own bash 3.2
+        if: runner.os == 'macOS'
+        run: |
+          /bin/bash --version | head -1
+          MTO_BASH=/bin/bash bats tests/mto.bats
+      - name: Interactive picker tests (pty)
+        run: python3 tests/interactive.py
+      - name: Installer
+        run: |
+          HOME="$(mktemp -d)" SHELL=/bin/bash ./install.sh
