@@ -1157,8 +1157,14 @@ _mto_prompt() { _mto_sync; _mto_visit; }
 # Bash can only redraw the prompt by submitting the line, so a half-typed
 # command is first cut (ctrl-a ctrl-k): press Ctrl-Y to paste it back.
 if [ -n "${MEMENTO_KEY-\\C-g}" ] && [[ $- == *i* ]]; then
-  bind -x '"\e[0mto~": mto go </dev/tty'
-  bind "\"${MEMENTO_KEY-\\C-g}\": \"\\C-a\\C-k\\e[0mto~\\C-m\""
+  if [ "${BASH_VERSINFO[0]}" -ge 4 ]; then
+    bind -x '"\e[0mto~": mto go </dev/tty'
+    bind "\"${MEMENTO_KEY-\\C-g}\": \"\\C-a\\C-k\\e[0mto~\\C-m\""
+  else
+    # bash 3.2 cannot run commands from key macros: jump in place, keep the
+    # typed text, and show the new directory (the prompt updates on enter).
+    bind -x "\"${MEMENTO_KEY-\\C-g}\": mto go </dev/tty && printf '\\033[2m→ %s\\033[0m\\n' \"\$PWD\""
+  fi
 fi
 
 case ";${PROMPT_COMMAND-};" in

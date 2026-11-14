@@ -22,6 +22,7 @@ except ImportError:
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MTO = os.path.join(ROOT, "bin", "mto")
+BASH_MAJOR = int(os.popen("bash -c 'echo ${BASH_VERSINFO[0]}'").read().strip() or 0)
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 failures = 0
 
@@ -139,7 +140,7 @@ def main():
             time.sleep(0.4)
             p.send("\r")
             time.sleep(0.8)
-            if shell == "bash":
+            if shell == "bash" and BASH_MAJOR >= 4:
                 pump(p, r"PROMPT> $")
                 p.send("\x19")  # ctrl-y pastes the cut command back
                 time.sleep(0.3)
