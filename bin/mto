@@ -1,0 +1,1503 @@
+#!/usr/bin/env bash
+# Memento (mto): tag directories, keep your aliases and scripts in one place,
+# and jump around the terminal without remembering where anything lives.
+#
+# Works with bash 3.2+ (the macOS default) and zsh. Data lives in $MEMENTO_HOME
+# (default: ~/.local/share/memento), never inside your shell's rc file.
+
+MEMENTO_VERSION="2.0.0"
+
+MEMENTO_HOME="${MEMENTO_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/memento}"
+TAGS="$MEMENTO_HOME/tags"
+ALIASES="$MEMENTO_HOME/aliases"
+HISTFILE_MTO="$MEMENTO_HOME/history"
+SCRIPTS="$MEMENTO_HOME/scripts"
+STAMP="$MEMENTO_HOME/.stamp"
+HISTORY_LIMIT="${MEMENTO_HISTORY_LIMIT:-2000}"
+
+case "$0" in
+  /*) SELF="$0" ;;
+  *) SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")" ;;
+esac
+
+TAB="$(printf '\t')"
+NAME_RE='^[A-Za-z_][A-Za-z0-9_-]*$'
+
+# ----------------------------------------------------------------- output
+
+if [ -t 2 ] && [ -z "${NO_COLOR-}" ]; then
+  C_RED=$'\033[31m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_CYAN=$'\033[36m'
+  C_PURPLE=$'\033[35m'; C_DIM=$'\033[2m'; C_BOLD=$'\033[1m'; C_RESET=$'\033[0m'
+else
+  C_RED=""; C_GREEN=""; C_YELLOW=""; C_CYAN=""; C_PURPLE=""; C_DIM=""; C_BOLD=""; C_RESET=""
+fi
+if [ -t 1 ] && [ -z "${NO_COLOR-}" ]; then
+  O_CYAN=$'\033[36m'; O_GREEN=$'\033[32m'; O_RED=$'\033[31m'; O_DIM=$'\033[2m'
+  O_BOLD=$'\033[1m'; O_PURPLE=$'\033[35m'; O_RESET=$'\033[0m'
+else
+  O_CYAN=""; O_GREEN=""; O_RED=""; O_DIM=""; O_BOLD=""; O_PURPLE=""; O_RESET=""
+fi
+
+info() { printf '%s\n' "$*" >&2; }
+ok() { printf '%s✔%s %s\n' "$C_GREEN" "$C_RESET" "$*" >&2; }
+warn() { printf '%swarning:%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
+die() { printf '%serror:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
+
+# Show $HOME as ~ in paths.
+pretty_path() {
+  case "$1" in
+    "$HOME") printf '~' ;;
+    "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+has_tty() { [ -t 0 ] && [ -t 2 ] && { : </dev/tty; } 2>/dev/null; }
+
+confirm() {
+  # confirm "question" -> 0 if yes. Non-interactive: no.
+  has_tty || return 1
+  local answer
+  printf '%s %s[y/N]%s ' "$1" "$C_DIM" "$C_RESET" >&2
+  IFS= read -r answer </dev/tty || return 1
+  case "$answer" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
+}
+
+editor() {
+  local ed="${MEMENTO_EDITOR:-${VISUAL:-${EDITOR:-vi}}}"
+  # shellcheck disable=SC2086 # allow editors with arguments, e.g. "code -w"
+  $ed "$@"
+}
+
+# ------------------------------------------------------------------ store
+# Tags and aliases are plain "name<TAB>value" files.
+
+ensure_home() {
+  mkdir -p "$MEMENTO_HOME" "$SCRIPTS" || die "cannot create $MEMENTO_HOME"
+  [ -f "$TAGS" ] || : >"$TAGS"
+  [ -f "$ALIASES" ] || : >"$ALIASES"
+  [ -f "$HISTFILE_MTO" ] || : >"$HISTFILE_MTO"
+}
+
+touch_stamp() {
+  printf '%s-%s-%s\n' "$(date +%s)" "$$" "$RANDOM" >"$STAMP"
+}
+
+store_get() { # file name
+  [ -f "$1" ] || return 1
+  N="$2" awk -F'\t' '$1 == ENVIRON["N"] { print substr($0, length($1) + 2); found = 1; exit } END { exit !found }' "$1"
+}
+
+store_has() { store_get "$1" "$2" >/dev/null; }
+
+store_set() { # file name value
+  local tmp="$1.tmp.$$"
+  N="$2" V="$3" awk -F'\t' '
+    $1 == ENVIRON["N"] { print ENVIRON["N"] "\t" ENVIRON["V"]; done = 1; next }
+    { print }
+    END { if (!done) print ENVIRON["N"] "\t" ENVIRON["V"] }
+  ' "$1" >"$tmp" && mv "$tmp" "$1"
+  touch_stamp
+}
+
+store_del() { # file name
+  local tmp="$1.tmp.$$"
+  N="$2" awk -F'\t' '$1 != ENVIRON["N"]' "$1" >"$tmp" && mv "$tmp" "$1"
+  touch_stamp
+}
+
+store_names() { [ -f "$1" ] && cut -f1 "$1"; }
+
+store_count() { if [ -f "$1" ]; then awk 'END { print NR }' "$1"; else echo 0; fi; }
+
+valid_name() { [[ $1 =~ $NAME_RE ]]; }
+
+check_value() { # reject values that would break the file format
+  case "$1" in
+    *"$TAB"* | *$'\n'*) die "$2 cannot contain tabs or newlines" ;;
+    "") die "$2 cannot be empty" ;;
+  esac
+}
+
+# Is NAME safe to turn into a shell alias? Exit 1 = forbidden, 2 = shadows a command.
+check_name() { # name force
+  local name="$1" force="$2" kind
+  valid_name "$name" || die "invalid name '$name' (use letters, digits, - and _, starting with a letter)"
+  case "$name" in
+    mto | memento) die "'$name' is reserved for Memento itself" ;;
+  esac
+  kind="$(type -t -- "$name" 2>/dev/null)"
+  case "$kind" in
+    keyword | builtin) die "'$name' is a shell $kind; pick another name" ;;
+    file)
+      if [ "$force" != 1 ]; then
+        die "'$name' would hide the command $(command -v -- "$name"); use --force to do it anyway"
+      fi
+      warn "'$name' now hides the command $(command -v -- "$name")"
+      ;;
+  esac
+}
+
+script_names() { [ -d "$SCRIPTS" ] && find "$SCRIPTS" -mindepth 1 -maxdepth 1 -type f -exec basename {} \; | sort; }
+
+# Which store owns a name (tag / alias / script)?
+owner_of() {
+  if store_has "$TAGS" "$1"; then echo tag
+  elif store_has "$ALIASES" "$1"; then echo alias
+  elif [ -f "$SCRIPTS/$1" ]; then echo script
+  else return 1
+  fi
+}
+
+# ---------------------------------------------------------------- actions
+# When called through the shell integration, MEMENTO_ACTION_FILE points to a
+# file the wrapper sources afterwards: that is how mto can change directory.
+
+emit_cd() {
+  if [ -n "${MEMENTO_ACTION_FILE-}" ]; then
+    printf 'cd -- %q\n' "$1" >>"$MEMENTO_ACTION_FILE"
+  else
+    printf '%s\n' "$1"
+    if [ -t 1 ]; then
+      info "${C_DIM}tip: run 'mto install' so mto can change your directory (or use: cd \"\$(mto go …)\")${C_RESET}"
+    fi
+  fi
+}
+
+emit_command() {
+  if [ -n "${MEMENTO_ACTION_FILE-}" ]; then
+    printf '%s\n' "$1" >>"$MEMENTO_ACTION_FILE"
+  else
+    info "${C_DIM}running: $1${C_RESET}"
+    bash -c "$1"
+  fi
+}
+
+# ----------------------------------------------------------------- picker
+
+use_fzf() { [ -z "${MEMENTO_NO_FZF-}" ] && command -v fzf >/dev/null 2>&1; }
+
+# pick PROMPT ITEM... -> prints the index of the chosen item
+pick() {
+  local prompt="$1"
+  shift
+  [ $# -gt 0 ] || return 1
+  if use_fzf && has_tty; then
+    local out
+    out="$(
+      i=0
+      for item in "$@"; do
+        printf '%s\t%s\n' "$i" "$item"
+        i=$((i + 1))
+      done | fzf --height=40% --layout=reverse --border=rounded --prompt="$prompt › " \
+        --delimiter="$TAB" --with-nth=2.. --no-multi --ansi
+    )" || return 1
+    printf '%s\n' "${out%%"$TAB"*}"
+    return 0
+  fi
+  has_tty || die "the interactive picker needs a terminal"
+  _menu "$prompt" "$@"
+}
+
+# Built-in picker: arrow keys / ctrl-n / ctrl-p to move, type to filter,
+# enter to choose, esc or ctrl-c to cancel. Draws on /dev/tty.
+_menu() {
+  local prompt="$1"
+  shift
+  local -a items shown
+  items=("$@")
+  local query="" sel=0 top=0 max=12 drawn=0 key rest i n lc_query
+  exec 3<>/dev/tty
+  trap 'printf "\033[?25h" >&3; exit 130' INT TERM
+  printf '\033[?25l' >&3
+  while :; do
+    shown=()
+    lc_query="$(lower "$query")"
+    i=0
+    while [ $i -lt ${#items[@]} ]; do
+      if [ -z "$lc_query" ]; then
+        shown+=("$i")
+      else
+        case "$(lower "${items[$i]}")" in *"$lc_query"*) shown+=("$i") ;; esac
+      fi
+      i=$((i + 1))
+    done
+    n=${#shown[@]}
+    [ "$sel" -ge "$n" ] && sel=$((n - 1))
+    [ $sel -lt 0 ] && sel=0
+    [ $sel -lt $top ] && top=$sel
+    [ $sel -ge $((top + max)) ] && top=$((sel - max + 1))
+
+    [ $drawn -gt 0 ] && printf '\033[%dA' "$drawn" >&3
+    printf '\r\033[J' >&3
+    printf '%s%s ›%s %s%s%s  %s(%d/%d)%s\n' "$C_PURPLE" "$prompt" "$C_RESET" "$C_BOLD" "$query" "$C_RESET" "$C_DIM" "$n" "${#items[@]}" "$C_RESET" >&3
+    drawn=1
+    i=$top
+    while [ "$i" -lt "$n" ] && [ $i -lt $((top + max)) ]; do
+      if [ $i -eq $sel ]; then
+        printf '%s› %s%s\n' $'\033[7m' "${items[${shown[$i]}]}" "$C_RESET" >&3
+      else
+        printf '  %s\n' "${items[${shown[$i]}]}" >&3
+      fi
+      drawn=$((drawn + 1))
+      i=$((i + 1))
+    done
+    if [ "$n" -eq 0 ]; then
+      printf '  %sno matches%s\n' "$C_DIM" "$C_RESET" >&3
+      drawn=$((drawn + 1))
+    fi
+    printf '%s↑↓ move · type to filter · enter select · esc cancel%s\n' "$C_DIM" "$C_RESET" >&3
+    drawn=$((drawn + 1))
+
+    IFS= read -rsn1 key <&3 || key=$'\004'
+    case "$key" in
+      "")  # enter
+        if [ "$n" -gt 0 ]; then
+          printf '\033[%dA\r\033[J\033[?25h' "$drawn" >&3
+          trap - INT TERM
+          printf '%s\n' "${shown[$sel]}"
+          return 0
+        fi
+        ;;
+      $'\033')
+        rest=""
+        if [ "${BASH_VERSINFO[0]}" -ge 4 ]; then
+          IFS= read -rsn2 -t 0.05 rest <&3 || true
+        else
+          IFS= read -rsn2 rest <&3 || true
+        fi
+        case "$rest" in
+          "[A" | "OA") sel=$((sel - 1)) ;;
+          "[B" | "OB") sel=$((sel + 1)) ;;
+          "") break ;;  # plain esc
+        esac
+        ;;
+      $'\020') sel=$((sel - 1)) ;;          # ctrl-p
+      $'\016' | $'\t') sel=$((sel + 1)) ;;  # ctrl-n / tab
+      $'\177' | $'\010') query="${query%?}"; sel=0 ;;
+      $'\004' | $'\007') break ;;           # ctrl-d / ctrl-g
+      *)
+        case "$key" in
+          [[:print:]]) query="$query$key"; sel=0; top=0 ;;
+        esac
+        ;;
+    esac
+  done
+  printf '\033[%dA\r\033[J\033[?25h' "$drawn" >&3
+  trap - INT TERM
+  return 1
+}
+
+# --------------------------------------------------------------------- tags
+
+next_tag_name() {
+  local i=1
+  while store_has "$TAGS" "t$i" || store_has "$ALIASES" "t$i"; do i=$((i + 1)); done
+  echo "t$i"
+}
+
+cmd_tag() {
+  local name="" dir="" force=0 arg
+  for arg in "$@"; do
+    case "$arg" in
+      -f | --force) force=1 ;;
+      -h | --help) help_for tag; return 0 ;;
+      -*) die "unknown option $arg" ;;
+      *) if [ -z "$name" ]; then name="$arg"; elif [ -z "$dir" ]; then dir="$arg"; else die "too many arguments"; fi ;;
+    esac
+  done
+  ensure_home
+  dir="${dir:-$PWD}"
+  [ -d "$dir" ] || die "not a directory: $dir"
+  dir="$(cd "$dir" && pwd)" || die "cannot open $dir"
+  check_value "$dir" "a path"
+  [ -n "$name" ] || name="$(next_tag_name)"
+  if store_has "$ALIASES" "$name"; then
+    die "'$name' is already an alias (mto unalias $name first)"
+  fi
+  local old
+  if old="$(store_get "$TAGS" "$name")"; then
+    if [ "$old" = "$dir" ]; then
+      ok "$name already points to $(pretty_path "$dir")"
+      return 0
+    fi
+    store_set "$TAGS" "$name" "$dir"
+    ok "moved tag ${C_BOLD}$name${C_RESET}: $(pretty_path "$old") → $(pretty_path "$dir")"
+    return 0
+  fi
+  check_name "$name" "$force"
+  store_set "$TAGS" "$name" "$dir"
+  ok "tagged $(pretty_path "$dir") as ${C_BOLD}$name${C_RESET}  ${C_DIM}(jump there with: $name  or  mto go $name)${C_RESET}"
+}
+
+# resolve_tag QUERY -> prints the tag name (exact, then prefix, then substring)
+resolve_tag() {
+  local q="$1" lq name path
+  local -a matches labels
+  if store_has "$TAGS" "$q"; then echo "$q"; return 0; fi
+  lq="$(lower "$q")"
+  matches=()
+  while IFS="$TAB" read -r name path; do
+    case "$(lower "$name")" in "$lq"*) matches+=("$name") ;; esac
+  done <"$TAGS"
+  if [ ${#matches[@]} -eq 0 ]; then
+    while IFS="$TAB" read -r name path; do
+      case "$(lower "$name") $(lower "${path##*/}")" in *"$lq"*) matches+=("$name") ;; esac
+    done <"$TAGS"
+  fi
+  case ${#matches[@]} in
+    0) return 1 ;;
+    1) echo "${matches[0]}"; return 0 ;;
+  esac
+  if has_tty; then
+    labels=()
+    for name in "${matches[@]}"; do
+      labels+=("$(printf '%-16s %s' "$name" "$(pretty_path "$(store_get "$TAGS" "$name")")")")
+    done
+    local idx
+    idx="$(pick "which '$q'" "${labels[@]}")" || exit 130
+    echo "${matches[$idx]}"
+    return 0
+  fi
+  printf '%serror:%s %s\n' "$C_RED" "$C_RESET" "'$q' matches several tags: ${matches[*]}" >&2
+  exit 2
+}
+
+cmd_go() {
+  [ $# -ge 1 ] || { cmd_pick_tag; return; }
+  [ "$1" = "-h" ] || [ "$1" = "--help" ] && { help_for go; return 0; }
+  ensure_home
+  local name path status
+  name="$(resolve_tag "$*")"
+  status=$?
+  [ $status -eq 2 ] || [ $status -eq 130 ] && exit $status
+  if [ $status -eq 0 ]; then
+    path="$(store_get "$TAGS" "$name")"
+    [ -d "$path" ] || die "tag '$name' points to $(pretty_path "$path"), which no longer exists (mto tag $name <dir> to fix, mto untag $name to remove)"
+    emit_cd "$path"
+    return 0
+  fi
+  # No tag: fall back to frequently visited directories.
+  if path="$(z_best "$@")"; then
+    info "${C_DIM}no tag '$*'; jumping to $(pretty_path "$path")${C_RESET}"
+    emit_cd "$path"
+    return 0
+  fi
+  die "no tag or recent directory matches '$*' (see: mto tags)"
+}
+
+cmd_pick_tag() {
+  ensure_home
+  local -a names labels
+  local name path label idx
+  names=()
+  labels=()
+  while IFS="$TAB" read -r name path; do
+    names+=("$name")
+    label="$(printf '%-16s %s' "$name" "$(pretty_path "$path")")"
+    [ -d "$path" ] || label="$label  (missing)"
+    labels+=("$label")
+  done <"$TAGS"
+  [ ${#names[@]} -gt 0 ] || die "no tags yet: run 'mto tag' in a directory you want to come back to"
+  idx="$(pick "tags" "${labels[@]}")" || return 130
+  cmd_go "${names[$idx]}"
+}
+
+cmd_tags() {
+  local plain=0
+  case "${1-}" in --plain) plain=1 ;; -h | --help) help_for tags; return 0 ;; esac
+  ensure_home
+  if [ $plain = 1 ]; then cat "$TAGS"; return 0; fi
+  if [ ! -s "$TAGS" ]; then
+    info "no tags yet: run ${C_BOLD}mto tag${C_RESET} (or ${C_BOLD}mto tag <name>${C_RESET}) in a directory"
+    return 0
+  fi
+  local name path width=4
+  while IFS="$TAB" read -r name path; do [ ${#name} -gt "$width" ] && width=${#name}; done <"$TAGS"
+  while IFS="$TAB" read -r name path; do
+    if [ -d "$path" ]; then
+      printf '  %s%-*s%s  %s\n' "$O_CYAN" "$width" "$name" "$O_RESET" "$(pretty_path "$path")"
+    else
+      printf '  %s%-*s%s  %s %s(missing)%s\n' "$O_CYAN" "$width" "$name" "$O_RESET" "$(pretty_path "$path")" "$O_RED" "$O_RESET"
+    fi
+  done <"$TAGS"
+}
+
+cmd_untag() {
+  ensure_home
+  case "${1-}" in
+    "") die "usage: mto untag <name> | --all | --missing" ;;
+    -h | --help) help_for untag ;;
+    --all)
+      [ -s "$TAGS" ] || { info "no tags to remove"; return 0; }
+      if [ "${2-}" != "-y" ] && ! confirm "Remove all $(store_count "$TAGS") tags?"; then
+        info "nothing removed (use: mto untag --all -y)"
+        return 1
+      fi
+      : >"$TAGS"
+      touch_stamp
+      ok "removed all tags"
+      ;;
+    --missing)
+      local name path removed=0
+      while IFS="$TAB" read -r name path; do
+        if [ ! -d "$path" ]; then store_del "$TAGS" "$name"; ok "removed $name ($(pretty_path "$path"))"; removed=$((removed + 1)); fi
+      done < <(cat "$TAGS")
+      [ $removed -gt 0 ] || info "all tags point to existing directories"
+      ;;
+    *)
+      local name
+      for name in "$@"; do
+        if store_has "$TAGS" "$name"; then store_del "$TAGS" "$name"; ok "removed tag $name"
+        else warn "no tag named '$name'"; fi
+      done
+      ;;
+  esac
+}
+
+cmd_rename() {
+  [ $# -eq 2 ] || die "usage: mto rename <old> <new>"
+  ensure_home
+  local old="$1" new="$2" kind value
+  kind="$(owner_of "$old")" || die "nothing named '$old'"
+  [ "$old" = "$new" ] && return 0
+  owner_of "$new" >/dev/null && die "'$new' is already a $(owner_of "$new")"
+  check_name "$new" 0
+  case "$kind" in
+    tag) value="$(store_get "$TAGS" "$old")"; store_del "$TAGS" "$old"; store_set "$TAGS" "$new" "$value" ;;
+    alias) value="$(store_get "$ALIASES" "$old")"; store_del "$ALIASES" "$old"; store_set "$ALIASES" "$new" "$value" ;;
+    script) mv "$SCRIPTS/$old" "$SCRIPTS/$new"; touch_stamp ;;
+  esac
+  ok "renamed $kind $old → ${C_BOLD}$new${C_RESET}"
+}
+
+# ------------------------------------------------------------------ history
+
+cmd__visit() {
+  local dir="${1:-$PWD}" now tmp lines
+  [ "$dir" = "$HOME" ] || [ "$dir" = "/" ] && return 0
+  [ -n "${MEMENTO_NO_HISTORY-}" ] && return 0
+  ensure_home
+  now="$(date +%s)"
+  tmp="$HISTFILE_MTO.tmp.$$"
+  D="$dir" NOW="$now" awk -F'\t' -v OFS='\t' '
+    $1 == ENVIRON["D"] { $2 = $2 + 1; $3 = ENVIRON["NOW"]; found = 1 }
+    { print }
+    END { if (!found) print ENVIRON["D"], 1, ENVIRON["NOW"] }
+  ' "$HISTFILE_MTO" >"$tmp" && mv "$tmp" "$HISTFILE_MTO"
+  lines="$(store_count "$HISTFILE_MTO")"
+  if [ "$lines" -gt "$HISTORY_LIMIT" ]; then
+    # keep the most recently used entries (ties: the ones added last)
+    awk -F'\t' '{ print $3 "\t" NR "\t" $0 }' "$HISTFILE_MTO" | sort -t "$TAB" -k1,1nr -k2,2nr |
+      head -n "$HISTORY_LIMIT" | sort -t "$TAB" -k2,2n | cut -f3- >"$tmp" && mv "$tmp" "$HISTFILE_MTO"
+  fi
+}
+
+# Print "score<TAB>path" for history entries matching all terms, best first.
+z_rank() {
+  local pattern="" term last=""
+  for term in "$@"; do
+    term="$(lower "$term" | sed 's/[][\.^$*+?(){}|/]/\\&/g')"
+    pattern="${pattern:+$pattern.*}$term"
+    last="$term"
+  done
+  [ -f "$HISTFILE_MTO" ] || return 0
+  P="$pattern" L="$last" NOW="$(date +%s)" awk -F'\t' '
+    {
+      p = tolower($1)
+      if (ENVIRON["P"] != "" && p !~ ENVIRON["P"]) next
+      age = ENVIRON["NOW"] - $3
+      w = (age < 3600) ? 4 : (age < 86400) ? 2 : (age < 604800) ? 0.5 : 0.25
+      s = $2 * w
+      base = p; sub(/.*\//, "", base)
+      if (ENVIRON["L"] != "" && base ~ ENVIRON["L"]) s = s * 3
+      printf "%.2f\t%s\n", s, $1
+    }
+  ' "$HISTFILE_MTO" | sort -t "$TAB" -k1,1gr
+}
+
+z_best() {
+  local score path
+  while IFS="$TAB" read -r score path; do
+    if [ -d "$path" ] && [ "$path" != "$PWD" ]; then echo "$path"; return 0; fi
+  done < <(z_rank "$@")
+  return 1
+}
+
+cmd_z() {
+  case "${1-}" in -h | --help) help_for z; return 0 ;; esac
+  ensure_home
+  if [ $# -eq 0 ]; then
+    local -a paths labels
+    local score path idx
+    paths=()
+    labels=()
+    while IFS="$TAB" read -r score path; do
+      [ -d "$path" ] || continue
+      paths+=("$path")
+      labels+=("$(pretty_path "$path")")
+      [ ${#paths[@]} -ge 50 ] && break
+    done < <(z_rank)
+    [ ${#paths[@]} -gt 0 ] || die "no history yet: Memento learns the directories you visit once 'mto install' is done"
+    idx="$(pick "recent" "${labels[@]}")" || return 130
+    emit_cd "${paths[$idx]}"
+    return 0
+  fi
+  local path
+  path="$(z_best "$@")" || die "no visited directory matches '$*'"
+  emit_cd "$path"
+}
+
+cmd_recent() {
+  ensure_home
+  local n="${1:-15}" score path count=0
+  [ -s "$HISTFILE_MTO" ] || { info "no history yet"; return 0; }
+  while IFS="$TAB" read -r score path; do
+    [ -d "$path" ] || continue
+    printf '  %s%6s%s  %s\n' "$O_DIM" "$score" "$O_RESET" "$(pretty_path "$path")"
+    count=$((count + 1))
+    [ $count -ge "$n" ] && break
+  done < <(z_rank)
+}
+
+# ------------------------------------------------------------------ aliases
+
+cmd_alias() {
+  ensure_home
+  local force=0
+  case "${1-}" in
+    -h | --help) help_for alias; return 0 ;;
+    -f | --force) force=1; shift ;;
+  esac
+  if [ $# -eq 0 ]; then cmd_aliases; return 0; fi
+  local name="$1"
+  shift
+  [ $# -gt 0 ] || { store_get "$ALIASES" "$name" || die "no alias named '$name'"; return 0; }
+  local command="$*"
+  check_value "$command" "the command"
+  store_has "$TAGS" "$name" && die "'$name' is already a tag (mto untag $name first)"
+  if ! store_has "$ALIASES" "$name"; then check_name "$name" "$force"; fi
+  store_set "$ALIASES" "$name" "$command"
+  ok "alias ${C_BOLD}$name${C_RESET} = $command"
+}
+
+cmd_aliases() {
+  ensure_home
+  if [ ! -s "$ALIASES" ]; then
+    info "no aliases yet: mto alias <name> <command>"
+    return 0
+  fi
+  local name command width=4
+  while IFS="$TAB" read -r name command; do [ ${#name} -gt "$width" ] && width=${#name}; done <"$ALIASES"
+  while IFS="$TAB" read -r name command; do
+    printf '  %s%-*s%s  %s\n' "$O_GREEN" "$width" "$name" "$O_RESET" "$command"
+  done <"$ALIASES"
+}
+
+cmd_unalias() {
+  ensure_home
+  case "${1-}" in
+    "") die "usage: mto unalias <name> | --all" ;;
+    -h | --help) help_for alias ;;
+    --all)
+      [ -s "$ALIASES" ] || { info "no aliases to remove"; return 0; }
+      if [ "${2-}" != "-y" ] && ! confirm "Remove all $(store_count "$ALIASES") aliases?"; then
+        info "nothing removed (use: mto unalias --all -y)"
+        return 1
+      fi
+      : >"$ALIASES"
+      touch_stamp
+      ok "removed all aliases"
+      ;;
+    *)
+      local name
+      for name in "$@"; do
+        if store_has "$ALIASES" "$name"; then store_del "$ALIASES" "$name"; ok "removed alias $name"
+        else warn "no alias named '$name'"; fi
+      done
+      ;;
+  esac
+}
+
+# ------------------------------------------------------------------ scripts
+
+script_description() {
+  # first comment line after the shebang
+  awk 'NR == 1 && /^#!/ { next } /^#/ { sub(/^#+ ?/, ""); print; exit } /[^ \t]/ { exit }' "$1" 2>/dev/null
+}
+
+cmd_script() {
+  ensure_home
+  local sub="${1-}"
+  [ $# -gt 0 ] && shift
+  case "$sub" in
+    add) script_add "$@" ;;
+    new) script_new "$@" ;;
+    edit) [ $# -eq 1 ] || die "usage: mto script edit <name>"; script_edit "$1" ;;
+    rm | remove) [ $# -ge 1 ] || die "usage: mto script rm <name>"; script_rm "$@" ;;
+    path) [ -f "$SCRIPTS/${1-}" ] || die "no script named '${1-}'"; echo "$SCRIPTS/$1" ;;
+    ls | list | "") cmd_scripts ;;
+    -h | --help | help) help_for script ;;
+    *) die "unknown script command '$sub' (add, new, edit, rm, ls, path)" ;;
+  esac
+}
+
+script_add() {
+  local file="" name="" move=0 force=0 arg
+  for arg in "$@"; do
+    case "$arg" in
+      --move) move=1 ;;
+      -f | --force) force=1 ;;
+      *) if [ -z "$file" ]; then file="$arg"; elif [ -z "$name" ]; then name="$arg"; else die "too many arguments"; fi ;;
+    esac
+  done
+  [ -n "$file" ] || die "usage: mto script add <file> [name] [--move]"
+  [ -f "$file" ] || die "file not found: $file"
+  if [ -z "$name" ]; then
+    name="$(basename "$file")"
+    name="${name%.*}"
+  fi
+  [ -e "$SCRIPTS/$name" ] && [ $force != 1 ] && die "a script named '$name' already exists (use --force to replace it)"
+  owner_of "$name" >/dev/null && [ "$(owner_of "$name")" != script ] && die "'$name' is already a $(owner_of "$name")"
+  check_name "$name" "$force"
+  if [ $move = 1 ]; then mv "$file" "$SCRIPTS/$name"; else cp "$file" "$SCRIPTS/$name"; fi
+  chmod +x "$SCRIPTS/$name"
+  touch_stamp
+  head -n 1 "$SCRIPTS/$name" | grep -q '^#!' || warn "$name has no #! line; add one (e.g. #!/usr/bin/env bash) so it runs everywhere"
+  ok "added script ${C_BOLD}$name${C_RESET}  ${C_DIM}(run it from anywhere as: $name)${C_RESET}"
+}
+
+script_new() {
+  local name="${1-}"
+  [ -n "$name" ] || die "usage: mto script new <name>"
+  [ -e "$SCRIPTS/$name" ] && die "a script named '$name' already exists (mto script edit $name)"
+  owner_of "$name" >/dev/null && die "'$name' is already a $(owner_of "$name")"
+  check_name "$name" 0
+  cat >"$SCRIPTS/$name" <<EOF
+#!/usr/bin/env bash
+# $name: describe what this script does
+set -euo pipefail
+
+echo "hello from $name"
+EOF
+  chmod +x "$SCRIPTS/$name"
+  touch_stamp
+  ok "created script ${C_BOLD}$name${C_RESET} in $(pretty_path "$SCRIPTS")"
+  if has_tty; then editor "$SCRIPTS/$name"; fi
+}
+
+script_edit() {
+  [ -f "$SCRIPTS/$1" ] || die "no script named '$1' (see: mto scripts)"
+  editor "$SCRIPTS/$1"
+  chmod +x "$SCRIPTS/$1"
+}
+
+script_rm() {
+  local name
+  for name in "$@"; do
+    if [ -f "$SCRIPTS/$name" ]; then rm -f "$SCRIPTS/$name"; touch_stamp; ok "removed script $name"
+    else warn "no script named '$name'"; fi
+  done
+}
+
+cmd_scripts() {
+  ensure_home
+  local names name width=4 desc
+  names="$(script_names)"
+  if [ -z "$names" ]; then
+    info "no scripts yet: mto script add <file>  or  mto script new <name>"
+    return 0
+  fi
+  while IFS= read -r name; do [ ${#name} -gt "$width" ] && width=${#name}; done <<<"$names"
+  while IFS= read -r name; do
+    desc="$(script_description "$SCRIPTS/$name")"
+    printf '  %s%-*s%s  %s%s%s\n' "$O_PURPLE" "$width" "$name" "$O_RESET" "$O_DIM" "$desc" "$O_RESET"
+  done <<<"$names"
+}
+
+cmd_run() {
+  [ $# -ge 1 ] || die "usage: mto run <script|alias> [args...]"
+  ensure_home
+  local name="$1" command
+  shift
+  if [ -f "$SCRIPTS/$name" ]; then
+    exec "$SCRIPTS/$name" "$@"
+  elif command="$(store_get "$ALIASES" "$name")"; then
+    local q="" a
+    for a in "$@"; do q="$q $(printf '%q' "$a")"; done
+    emit_command "$command$q"
+  else
+    die "no script or alias named '$name'"
+  fi
+}
+
+# ---------------------------------------------------------------- overview
+
+cmd_ls() {
+  ensure_home
+  printf '%sTags%s %s(%s)%s\n' "$O_BOLD" "$O_RESET" "$O_DIM" "$(store_count "$TAGS")" "$O_RESET"
+  cmd_tags 2>&1
+  printf '\n%sAliases%s %s(%s)%s\n' "$O_BOLD" "$O_RESET" "$O_DIM" "$(store_count "$ALIASES")" "$O_RESET"
+  cmd_aliases 2>&1
+  printf '\n%sScripts%s %s(%s)%s\n' "$O_BOLD" "$O_RESET" "$O_DIM" "$(script_names | awk 'END { print NR }')" "$O_RESET"
+  cmd_scripts 2>&1
+}
+
+cmd_menu() {
+  has_tty || { cmd_ls; return 0; }
+  ensure_home
+  local -a options actions
+  options=()
+  actions=()
+  if [ -s "$TAGS" ]; then options+=("Jump to a tag            ($(store_count "$TAGS"))"); actions+=(tags); fi
+  if [ -s "$HISTFILE_MTO" ]; then options+=("Jump to a recent directory"); actions+=(recent); fi
+  if [ -s "$ALIASES" ]; then options+=("Run an alias             ($(store_count "$ALIASES"))"); actions+=(aliases); fi
+  if [ -n "$(script_names)" ]; then
+    options+=("Run a script             ($(script_names | awk 'END { print NR }'))"); actions+=(scripts)
+    options+=("Edit a script"); actions+=(edit)
+  fi
+  options+=("Tag this directory       ($(pretty_path "$PWD"))"); actions+=(tag)
+  options+=("Add an alias"); actions+=(newalias)
+  options+=("Show everything"); actions+=(ls)
+  local idx
+  idx="$(pick "memento" "${options[@]}")" || return 130
+  case "${actions[$idx]}" in
+    tags) cmd_pick_tag ;;
+    recent) cmd_z ;;
+    aliases | scripts | edit) menu_pick_runnable "${actions[$idx]}" ;;
+    tag)
+      local name
+      printf '%sname for this tag%s (enter for automatic): ' "$C_CYAN" "$C_RESET" >&2
+      IFS= read -r name </dev/tty
+      cmd_tag ${name:+"$name"}
+      ;;
+    newalias)
+      local name command
+      printf '%salias name:%s ' "$C_CYAN" "$C_RESET" >&2
+      IFS= read -r name </dev/tty
+      printf '%scommand:%s ' "$C_CYAN" "$C_RESET" >&2
+      IFS= read -r command </dev/tty
+      cmd_alias "$name" "$command"
+      ;;
+    ls) cmd_ls ;;
+  esac
+}
+
+menu_pick_runnable() {
+  local -a names labels
+  local name value idx width=4
+  names=()
+  labels=()
+  if [ "$1" = aliases ]; then
+    while IFS="$TAB" read -r name value; do [ ${#name} -gt "$width" ] && width=${#name}; done <"$ALIASES"
+    while IFS="$TAB" read -r name value; do
+      names+=("$name")
+      labels+=("$(printf '%-*s  %s' "$width" "$name" "$value")")
+    done <"$ALIASES"
+  else
+    while IFS= read -r name; do
+      names+=("$name")
+      labels+=("$(printf '%-16s %s' "$name" "$(script_description "$SCRIPTS/$name")")")
+    done < <(script_names)
+  fi
+  idx="$(pick "$1" "${labels[@]}")" || return 130
+  name="${names[$idx]}"
+  case "$1" in
+    aliases) emit_command "$(store_get "$ALIASES" "$name")" ;;
+    scripts) emit_command "$(printf '%q' "$SCRIPTS/$name")" ;;
+    edit) script_edit "$name" ;;
+  esac
+}
+
+# ------------------------------------------------------------ integration
+
+shell_quote() { # single-quote for sh/bash/zsh
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+# Shell code that (re)defines one alias per tag and user alias.
+cmd__defs() {
+  ensure_home
+  local shell="${1:-bash}" previous="${2-}" name value defined="" stamp=""
+  for name in $previous; do
+    printf 'unalias %s 2>/dev/null\n' "$name"
+  done
+  while IFS="$TAB" read -r name value; do
+    valid_name "$name" || continue
+    printf 'alias %s=%s\n' "$name" "$(shell_quote "mto go $name")"
+    defined="$defined $name"
+  done <"$TAGS"
+  while IFS="$TAB" read -r name value; do
+    valid_name "$name" || continue
+    printf 'alias %s=%s\n' "$name" "$(shell_quote "$value")"
+    defined="$defined $name"
+  done <"$ALIASES"
+  [ -f "$STAMP" ] && IFS= read -r stamp <"$STAMP"
+  printf '_MEMENTO_DEFINED=%s\n' "$(shell_quote "${defined# }")"
+  printf '_MEMENTO_STAMP=%s\n' "$(shell_quote "$stamp")"
+  : "$shell"
+}
+
+cmd_init() {
+  local shell="${1-}"
+  [ -n "$shell" ] || shell="$(basename "${SHELL:-bash}")"
+  ensure_home
+  local bin scripts stamp
+  bin="$(shell_quote "$SELF")"
+  scripts="$(shell_quote "$SCRIPTS")"
+  stamp="$(shell_quote "$STAMP")"
+  case "$shell" in
+    bash | zsh) ;;
+    *) die "unsupported shell '$shell' (bash and zsh are supported)" ;;
+  esac
+  cat <<EOF
+# Memento shell integration ($shell). Generated by: mto init $shell
+_MEMENTO_BIN=$bin
+_MEMENTO_STAMP_FILE=$stamp
+export MEMENTO_INTEGRATION=$shell
+case ":\$PATH:" in *:$scripts:*) ;; *) PATH=$scripts:\$PATH ;; esac
+
+mto() {
+  local __mto_action __mto_status
+  __mto_action=\$(mktemp "\${TMPDIR:-/tmp}/memento.XXXXXX") || return 1
+  MEMENTO_ACTION_FILE=\$__mto_action "\$_MEMENTO_BIN" "\$@"
+  __mto_status=\$?
+  if [ -s "\$__mto_action" ]; then . "\$__mto_action"; fi
+  command rm -f -- "\$__mto_action"
+  _mto_sync
+  return \$__mto_status
+}
+
+# Reload tags and aliases when they changed (also from another terminal).
+_mto_sync() {
+  local __mto_stamp=""
+  [ -r "\$_MEMENTO_STAMP_FILE" ] && IFS= read -r __mto_stamp < "\$_MEMENTO_STAMP_FILE"
+  if [ "\$__mto_stamp" != "\${_MEMENTO_STAMP-}" ]; then
+    eval "\$("\$_MEMENTO_BIN" _defs $shell "\${_MEMENTO_DEFINED-}")"
+  fi
+}
+
+# Remember visited directories for 'mto z'.
+_mto_visit() {
+  [ -n "\${MEMENTO_NO_HISTORY-}" ] && return 0
+  [ "\$PWD" = "\${_MEMENTO_PWD-}" ] && return 0
+  _MEMENTO_PWD=\$PWD
+  "\$_MEMENTO_BIN" _visit "\$PWD"
+}
+EOF
+  if [ "$shell" = zsh ]; then
+    cat <<'EOF'
+
+_mto_precmd() { _mto_sync; _mto_visit; }
+autoload -Uz add-zsh-hook
+add-zsh-hook precmd _mto_precmd
+
+_mto_complete() {
+  local -a subcommands names
+  subcommands=(
+    'go:jump to a tag' 'tag:tag the current directory' 'tags:list tags' 'untag:remove a tag'
+    'z:jump to a frequently visited directory' 'recent:list frequently visited directories'
+    'alias:add or list aliases' 'unalias:remove an alias' 'script:manage scripts' 'scripts:list scripts'
+    'run:run a script or alias' 'rename:rename a tag, alias or script' 'ls:show everything'
+    'doctor:check the setup' 'export:back up tags and aliases' 'import:restore a backup'
+    'migrate:import entries from Memento 1' 'install:add the shell hook' 'uninstall:remove the shell hook'
+    'demo:try Memento in a sandbox' 'help:show help' 'version:show the version'
+  )
+  if (( CURRENT == 2 )); then
+    _describe -t commands 'mto command' subcommands
+    return
+  fi
+  case $words[2] in
+    go|untag) names=(${(f)"$("$_MEMENTO_BIN" _names tags)"}); compadd -a names ;;
+    unalias) names=(${(f)"$("$_MEMENTO_BIN" _names aliases)"}); compadd -a names ;;
+    run) names=(${(f)"$("$_MEMENTO_BIN" _names scripts)"} ${(f)"$("$_MEMENTO_BIN" _names aliases)"}); compadd -a names ;;
+    rename) names=(${(f)"$("$_MEMENTO_BIN" _names all)"}); compadd -a names ;;
+    script)
+      if (( CURRENT == 3 )); then compadd add new edit rm ls path
+      elif [[ $words[3] == add ]]; then _files
+      else names=(${(f)"$("$_MEMENTO_BIN" _names scripts)"}); compadd -a names
+      fi ;;
+    tag) (( CURRENT == 4 )) && _directories ;;
+    import|export) _files ;;
+    init|install) compadd bash zsh ;;
+    help) compadd go tag tags untag z recent alias script run rename ls doctor export import migrate install uninstall demo ;;
+  esac
+}
+_mto_try_compdef() {
+  if (( $+functions[compdef] )); then
+    compdef _mto_complete mto
+    add-zsh-hook -d precmd _mto_try_compdef
+  fi
+}
+add-zsh-hook precmd _mto_try_compdef
+_mto_try_compdef
+EOF
+  else
+    cat <<'EOF'
+
+_mto_prompt() { _mto_sync; _mto_visit; }
+case ";${PROMPT_COMMAND-};" in
+  *";_mto_prompt;"*) ;;
+  *) PROMPT_COMMAND="_mto_prompt${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
+esac
+
+_mto_complete() {
+  local cur=${COMP_WORDS[COMP_CWORD]} words=""
+  if [ "$COMP_CWORD" -eq 1 ]; then
+    words="go tag tags untag z recent alias unalias script scripts run rename ls doctor export import migrate install uninstall demo help version"
+  else
+    case ${COMP_WORDS[1]} in
+      go|untag) words=$("$_MEMENTO_BIN" _names tags) ;;
+      unalias) words=$("$_MEMENTO_BIN" _names aliases) ;;
+      run) words="$("$_MEMENTO_BIN" _names scripts) $("$_MEMENTO_BIN" _names aliases)" ;;
+      rename) words=$("$_MEMENTO_BIN" _names all) ;;
+      script)
+        if [ "$COMP_CWORD" -eq 2 ]; then words="add new edit rm ls path"
+        elif [ "${COMP_WORDS[2]}" = add ]; then COMPREPLY=($(compgen -f -- "$cur")); return
+        else words=$("$_MEMENTO_BIN" _names scripts); fi ;;
+      tag) [ "$COMP_CWORD" -eq 3 ] && { COMPREPLY=($(compgen -d -- "$cur")); return; } ;;
+      import|export) COMPREPLY=($(compgen -f -- "$cur")); return ;;
+      init|install) words="bash zsh" ;;
+      help) words="go tag tags untag z recent alias script run rename ls doctor export import migrate install uninstall demo" ;;
+    esac
+  fi
+  COMPREPLY=($(compgen -W "$words" -- "$cur"))
+}
+complete -F _mto_complete mto
+EOF
+  fi
+  # shellcheck disable=SC2016 # the $(...) is meant for the user's shell
+  printf '\neval "$("$_MEMENTO_BIN" _defs %s)"\n' "$shell"
+}
+
+cmd__names() {
+  ensure_home
+  case "${1-}" in
+    tags) store_names "$TAGS" ;;
+    aliases) store_names "$ALIASES" ;;
+    scripts) script_names ;;
+    all) store_names "$TAGS"; store_names "$ALIASES"; script_names ;;
+  esac
+}
+
+# ------------------------------------------------------- install / uninstall
+
+detect_shell() {
+  local s
+  s="$(basename "${SHELL:-}")"
+  case "$s" in bash | zsh) echo "$s" ;; *) echo bash ;; esac
+}
+
+rc_for() {
+  case "$1" in
+    zsh) echo "${ZDOTDIR:-$HOME}/.zshrc" ;;
+    bash) echo "$HOME/.bashrc" ;;
+  esac
+}
+
+BLOCK_START="# >>> memento >>>"
+BLOCK_END="# <<< memento <<<"
+
+backup_rc() {
+  local backup
+  backup="$1.memento-backup-$(date +%Y%m%d%H%M%S)"
+  cp "$1" "$backup" && info "${C_DIM}backup: $(pretty_path "$backup")${C_RESET}"
+}
+
+cmd_install() {
+  local shell="" rc="" arg
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --rc) rc="$2"; shift ;;
+      --rc=*) rc="${1#--rc=}" ;;
+      bash | zsh) shell="$1" ;;
+      -h | --help) help_for install; return 0 ;;
+      *) die "unknown option $1" ;;
+    esac
+    shift
+  done
+  arg=""
+  : "$arg"
+  shell="${shell:-$(detect_shell)}"
+  rc="${rc:-$(rc_for "$shell")}"
+  ensure_home
+  touch "$rc" || die "cannot write $rc"
+  if grep -qF "$BLOCK_START" "$rc"; then
+    ok "already installed in $(pretty_path "$rc")"
+  else
+    [ -s "$rc" ] && backup_rc "$rc"
+    {
+      printf '\n%s\n' "$BLOCK_START"
+      # shellcheck disable=SC2016 # written to the rc file, expanded there
+      printf 'eval "$(%s init %s)"\n' "$(shell_quote "$SELF")" "$shell"
+      printf '%s\n' "$BLOCK_END"
+    } >>"$rc"
+    ok "added Memento to $(pretty_path "$rc")"
+    if [ "$shell" = bash ] && [ "$(uname -s)" = Darwin ] && [ -f "$HOME/.bash_profile" ] && ! grep -q bashrc "$HOME/.bash_profile"; then
+      warn "macOS bash reads ~/.bash_profile; add this line there:  [ -f ~/.bashrc ] && . ~/.bashrc"
+    fi
+    info "open a new terminal, or run:  ${C_BOLD}source $(pretty_path "$rc")${C_RESET}"
+  fi
+  if grep -q "made by Memento" "$rc" 2>/dev/null; then
+    info ""
+    warn "found entries from Memento 1 in $(pretty_path "$rc"); move them over with:  mto migrate"
+  fi
+}
+
+remove_block() { # file
+  local tmp="$1.tmp.$$"
+  awk -v s="$BLOCK_START" -v e="$BLOCK_END" '
+    $0 == s { skip = 1; next }
+    $0 == e { skip = 0; next }
+    !skip
+  ' "$1" >"$tmp" && mv "$tmp" "$1"
+}
+
+cmd_uninstall() {
+  local purge=0 yes=0 arg rc removed=0
+  for arg in "$@"; do
+    case "$arg" in
+      --purge) purge=1 ;;
+      -y | --yes) yes=1 ;;
+      -h | --help) help_for uninstall; return 0 ;;
+    esac
+  done
+  for rc in "$(rc_for zsh)" "$(rc_for bash)"; do
+    if [ -f "$rc" ] && grep -qF "$BLOCK_START" "$rc"; then
+      backup_rc "$rc"
+      remove_block "$rc"
+      ok "removed Memento from $(pretty_path "$rc")"
+      removed=1
+    fi
+  done
+  [ $removed = 1 ] || info "Memento was not installed in any rc file"
+  if [ $purge = 1 ]; then
+    if [ $yes = 1 ] || confirm "Delete all tags, aliases, scripts and history in $(pretty_path "$MEMENTO_HOME")?"; then
+      rm -rf "$MEMENTO_HOME"
+      ok "deleted $(pretty_path "$MEMENTO_HOME")"
+    else
+      info "kept your data in $(pretty_path "$MEMENTO_HOME")"
+    fi
+  else
+    info "${C_DIM}your data is kept in $(pretty_path "$MEMENTO_HOME") (use --purge to delete it)${C_RESET}"
+  fi
+}
+
+# ---------------------------------------------------------- migrate (v1)
+# Memento 1 wrote lines like these into ~/.zshrc or ~/.bashrc:
+#   alias t1='cd /path' #tag made by Memento
+#   alias ll='ls -la' #alias made by Memento
+#   alias hello='_mto_hello.sh' #script made by Memento
+
+cmd_migrate() {
+  local dry=0 rc="" script_dir="/usr/local/bin" arg
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run | -n) dry=1 ;;
+      --rc) rc="$2"; shift ;;
+      --script-dir) script_dir="$2"; shift ;;
+      -h | --help) help_for migrate; return 0 ;;
+      *) die "unknown option $1" ;;
+    esac
+    shift
+  done
+  arg=""
+  : "$arg"
+  ensure_home
+  local -a rcs
+  if [ -n "$rc" ]; then rcs=("$rc"); else rcs=("$(rc_for zsh)" "$(rc_for bash)"); fi
+  local file line name value kind found=0 tags=0 aliases=0 scripts=0 skipped=0
+  for file in "${rcs[@]}"; do
+    [ -f "$file" ] || continue
+    grep -q "made by Memento" "$file" || continue
+    found=1
+    info "${C_BOLD}$(pretty_path "$file")${C_RESET}"
+    while IFS= read -r line; do
+      case "$line" in
+        *"#tag made by Memento"*) kind="tag" ;;
+        *"#alias made by Memento"*) kind="alias" ;;
+        *"#script made by Memento"*) kind="script" ;;
+        *) continue ;;
+      esac
+      name="$(printf '%s' "$line" | sed -E "s/^[[:space:]]*alias ([^=]+)='(.*)' *#.*$/\\1/")"
+      value="$(printf '%s' "$line" | sed -E "s/^[[:space:]]*alias ([^=]+)='(.*)' *#.*$/\\2/")"
+      if [ "$name" = "$line" ] || ! valid_name "$name"; then
+        warn "skipped (could not read): $line"; skipped=$((skipped + 1)); continue
+      fi
+      case "$kind" in
+        tag)
+          value="${value#cd }"
+          info "  tag    $name → $value"
+          [ $dry = 1 ] || store_set "$TAGS" "$name" "$value"
+          tags=$((tags + 1))
+          ;;
+        alias)
+          case "$value" in *_mto_memento.sh*) info "  ${C_DIM}skip   $name (Memento 1 itself)${C_RESET}"; continue ;; esac
+          info "  alias  $name = $value"
+          [ $dry = 1 ] || store_set "$ALIASES" "$name" "$value"
+          aliases=$((aliases + 1))
+          ;;
+        script)
+          if [ -f "$script_dir/$value" ]; then
+            info "  script $name ← $script_dir/$value"
+            if [ $dry = 0 ]; then cp "$script_dir/$value" "$SCRIPTS/$name" && chmod +x "$SCRIPTS/$name"; fi
+            scripts=$((scripts + 1))
+          else
+            warn "  script $name: $script_dir/$value not found, skipped"
+            skipped=$((skipped + 1))
+          fi
+          ;;
+      esac
+    done <"$file"
+    if [ $dry = 0 ]; then
+      backup_rc "$file"
+      local tmp="$file.tmp.$$"
+      grep -v "made by Memento" "$file" >"$tmp"
+      cat "$tmp" >"$file" && rm -f "$tmp"
+      ok "removed Memento 1 lines from $(pretty_path "$file")"
+    fi
+  done
+  [ $found = 1 ] || { info "no Memento 1 entries found"; return 0; }
+  [ $dry = 1 ] && { info "dry run: nothing changed"; return 0; }
+  touch_stamp
+  local note=""
+  [ $skipped -gt 0 ] && note=" ($skipped skipped)"
+  ok "imported $tags tags, $aliases aliases and $scripts scripts$note"
+  if [ -f "$script_dir/_mto_memento.sh" ]; then
+    info "the old program is still at $script_dir/_mto_memento.sh; you can delete it"
+  fi
+}
+
+# ------------------------------------------------------------- export/import
+
+cmd_export() {
+  ensure_home
+  local out="${1:--}"
+  {
+    printf '# memento export v1 (%s)\n' "$(date '+%Y-%m-%d %H:%M')"
+    awk -F'\t' '{ print "tag\t" $0 }' "$TAGS"
+    awk -F'\t' '{ print "alias\t" $0 }' "$ALIASES"
+  } >"$( [ "$out" = - ] && echo /dev/stdout || echo "$out")"
+  [ "$out" = - ] || ok "exported $(store_count "$TAGS") tags and $(store_count "$ALIASES") aliases to $out"
+}
+
+cmd_import() {
+  [ $# -ge 1 ] || die "usage: mto import <file>"
+  [ -f "$1" ] || [ "$1" = - ] || die "file not found: $1"
+  ensure_home
+  local kind name value tags=0 aliases=0
+  while IFS="$TAB" read -r kind name value; do
+    case "$kind" in
+      tag) valid_name "$name" && store_set "$TAGS" "$name" "$value" && tags=$((tags + 1)) ;;
+      alias) valid_name "$name" && store_set "$ALIASES" "$name" "$value" && aliases=$((aliases + 1)) ;;
+    esac
+  done < <(if [ "$1" = - ]; then cat; else cat "$1"; fi)
+  ok "imported $tags tags and $aliases aliases"
+}
+
+# --------------------------------------------------------------------- doctor
+
+cmd_doctor() {
+  ensure_home
+  local problems=0 name path shell rc kind
+  printf '%sMemento %s%s\n' "$O_BOLD" "$MEMENTO_VERSION" "$O_RESET"
+  printf '  data      %s\n' "$(pretty_path "$MEMENTO_HOME")"
+  printf '  program   %s\n' "$(pretty_path "$SELF")"
+  if [ -n "${MEMENTO_INTEGRATION-}" ]; then
+    printf '  shell     %s✔ integration loaded (%s)%s\n' "$O_GREEN" "$MEMENTO_INTEGRATION" "$O_RESET"
+  else
+    shell="$(detect_shell)"
+    rc="$(rc_for "$shell")"
+    if [ -f "$rc" ] && grep -qF "$BLOCK_START" "$rc"; then
+      printf '  shell     %sinstalled in %s, but not loaded in this shell (open a new terminal)%s\n' "$O_RED" "$(pretty_path "$rc")" "$O_RESET"
+    else
+      printf '  shell     %snot installed: run mto install%s\n' "$O_RED" "$O_RESET"
+    fi
+    problems=$((problems + 1))
+  fi
+  if use_fzf; then printf '  picker    fzf\n'; else printf '  picker    built-in %s(install fzf for fuzzy search)%s\n' "$O_DIM" "$O_RESET"; fi
+
+  while IFS="$TAB" read -r name path; do
+    if [ ! -d "$path" ]; then
+      printf '  %s✘ tag %s points to a missing directory: %s%s\n' "$O_RED" "$name" "$(pretty_path "$path")" "$O_RESET"
+      problems=$((problems + 1))
+    fi
+  done <"$TAGS"
+  for name in $(store_names "$TAGS") $(store_names "$ALIASES") $(script_names); do
+    kind="$(type -t -- "$name" 2>/dev/null)"
+    case "$kind" in
+      file)
+        if [ ! -f "$SCRIPTS/$name" ] || [ "$(command -v -- "$name")" != "$SCRIPTS/$name" ]; then
+          printf '  %s! %s hides the command %s%s\n' "$O_RED" "$name" "$(command -v -- "$name")" "$O_RESET"
+        fi
+        ;;
+      builtin | keyword)
+        printf '  %s✘ %s is a shell %s and cannot be used%s\n' "$O_RED" "$name" "$kind" "$O_RESET"
+        problems=$((problems + 1))
+        ;;
+    esac
+  done
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    if [ ! -x "$SCRIPTS/$name" ]; then
+      printf '  %s✘ script %s is not executable (chmod +x %s)%s\n' "$O_RED" "$name" "$SCRIPTS/$name" "$O_RESET"
+      problems=$((problems + 1))
+    fi
+  done < <(script_names)
+  for rc in "$(rc_for zsh)" "$(rc_for bash)"; do
+    if [ -f "$rc" ] && grep -q "made by Memento" "$rc"; then
+      printf '  %s! Memento 1 entries in %s: run mto migrate%s\n' "$O_RED" "$(pretty_path "$rc")" "$O_RESET"
+      problems=$((problems + 1))
+    fi
+  done
+  printf '  content   %s tags, %s aliases, %s scripts, %s visited directories\n' \
+    "$(store_count "$TAGS")" "$(store_count "$ALIASES")" "$(script_names | awk 'END { print NR }')" "$(store_count "$HISTFILE_MTO")"
+  if [ $problems -eq 0 ]; then
+    printf '%s✔ everything looks good%s\n' "$O_GREEN" "$O_RESET"
+  else
+    printf '%s%d problem(s) found%s\n' "$O_RED" "$problems" "$O_RESET"
+    return 1
+  fi
+}
+
+# ----------------------------------------------------------------------- demo
+
+cmd_demo() {
+  local sandbox shell
+  sandbox="$(mktemp -d "${TMPDIR:-/tmp}/memento-demo.XXXXXX")" || die "cannot create a sandbox"
+  shell="${1:-$(detect_shell)}"
+  command -v "$shell" >/dev/null || shell=bash
+  mkdir -p "$sandbox/projects/website/src" "$sandbox/projects/api/handlers" "$sandbox/notes/2026"
+  # shellcheck disable=SC2030,SC2031 # the sandbox home is only for this subshell
+  (
+    export MEMENTO_HOME="$sandbox/memento" MEMENTO_NO_HISTORY=""
+    "$SELF" tag website "$sandbox/projects/website" >/dev/null 2>&1
+    "$SELF" tag api "$sandbox/projects/api" >/dev/null 2>&1
+    "$SELF" tag notes "$sandbox/notes" >/dev/null 2>&1
+    "$SELF" alias ll 'ls -la' >/dev/null 2>&1
+    "$SELF" alias today 'date "+%A %d %B"' >/dev/null 2>&1
+    # shellcheck disable=SC2016 # literal script text
+    printf '#!/usr/bin/env bash\n# greet: says hello to whoever you name\necho "hello, ${1:-world}!"\n' >"$sandbox/greet"
+    "$SELF" script add "$sandbox/greet" >/dev/null 2>&1
+    for d in projects/api/handlers projects/api projects/website/src notes/2026 notes/2026; do
+      "$SELF" _visit "$sandbox/$d"
+    done
+  )
+  local banner
+  banner="$(cat <<EOF
+printf '\n\033[35m● Memento demo\033[0m: a throwaway sandbox, deleted when you type exit.\n\n'
+printf '  try:  \033[1mmto\033[0m            interactive menu\n'
+printf '        \033[1mwebsite\033[0m        jump to a tag (also: api, notes)\n'
+printf '        \033[1mmto go web\033[0m     fuzzy jump\n'
+printf '        \033[1mmto z hand\033[0m     jump to a visited directory by part of its name\n'
+printf '        \033[1mmto tag\033[0m        tag where you are\n'
+printf '        \033[1mmto ls\033[0m         everything at a glance\n'
+printf '        \033[1mgreet Remco\033[0m    a managed script\n\n'
+EOF
+)"
+  if [ "$shell" = zsh ]; then
+    cat >"$sandbox/.zshrc" <<EOF
+export MEMENTO_HOME=$(shell_quote "$sandbox/memento") HOME=$(shell_quote "$sandbox")
+PROMPT='%F{magenta}mto-demo%f %F{cyan}%~%f $ '
+eval "\$($(shell_quote "$SELF") init zsh)"
+autoload -Uz compinit && compinit -u -d $(shell_quote "$sandbox/.zcompdump")
+$banner
+cd $(shell_quote "$sandbox")
+EOF
+    ZDOTDIR="$sandbox" zsh -i
+  else
+    cat >"$sandbox/.bashrc" <<EOF
+export MEMENTO_HOME=$(shell_quote "$sandbox/memento") HOME=$(shell_quote "$sandbox")
+PS1='\[\e[35m\]mto-demo\[\e[0m\] \[\e[36m\]\w\[\e[0m\] $ '
+eval "\$($(shell_quote "$SELF") init bash)"
+$banner
+cd $(shell_quote "$sandbox")
+EOF
+    bash --rcfile "$sandbox/.bashrc" -i
+  fi
+  rm -rf "$sandbox"
+  ok "demo sandbox removed"
+}
+
+# ----------------------------------------------------------------------- help
+
+usage() {
+  # shellcheck disable=SC2031
+  cat <<EOF
+${O_BOLD}Memento${O_RESET} ${O_DIM}$MEMENTO_VERSION${O_RESET}: tag directories, keep aliases and scripts, jump around fast.
+
+${O_BOLD}Usage:${O_RESET} mto [command] [arguments]       ${O_DIM}(no command: interactive menu)${O_RESET}
+
+${O_BOLD}Directories${O_RESET}
+  ${O_CYAN}tag${O_RESET} [name] [dir]         tag the current (or given) directory; no name gives t1, t2, …
+  ${O_CYAN}go${O_RESET} <name>                jump to a tag (prefix or part of the name is enough)
+  ${O_CYAN}<name>${O_RESET}                   every tag is also a command: just type its name
+  ${O_CYAN}tags${O_RESET}                     list tags          ${O_CYAN}untag${O_RESET} <name>|--missing|--all
+  ${O_CYAN}z${O_RESET} <part...>              jump to the best match among directories you visited
+  ${O_CYAN}recent${O_RESET}                   list frequently visited directories
+
+${O_BOLD}Aliases & scripts${O_RESET}
+  ${O_CYAN}alias${O_RESET} <name> <command>   add an alias (available immediately, in every terminal)
+  ${O_CYAN}unalias${O_RESET} <name>|--all     remove aliases     ${O_CYAN}alias${O_RESET}  list aliases
+  ${O_CYAN}script${O_RESET} add <file> [name] put a script on your PATH (copied into Memento)
+  ${O_CYAN}script${O_RESET} new|edit|rm <name> create, edit or remove a script    ${O_CYAN}scripts${O_RESET}  list
+  ${O_CYAN}run${O_RESET} <name> [args]        run a script or alias
+
+${O_BOLD}Everything else${O_RESET}
+  ${O_CYAN}ls${O_RESET}                       show tags, aliases and scripts
+  ${O_CYAN}rename${O_RESET} <old> <new>       rename a tag, alias or script
+  ${O_CYAN}install${O_RESET} [bash|zsh]       add Memento to your shell   ${O_CYAN}uninstall${O_RESET} [--purge]
+  ${O_CYAN}doctor${O_RESET}                   check your setup
+  ${O_CYAN}export${O_RESET} [file] / ${O_CYAN}import${O_RESET} <file>   back up and restore tags and aliases
+  ${O_CYAN}migrate${O_RESET} [--dry-run]      move entries from Memento 1 out of your rc file
+  ${O_CYAN}demo${O_RESET}                     try Memento in a throwaway sandbox shell
+  ${O_CYAN}help${O_RESET} <command>           details about a command
+
+Data lives in $(pretty_path "$MEMENTO_HOME") ${O_DIM}(set MEMENTO_HOME to change it)${O_RESET}
+EOF
+}
+
+help_for() {
+  case "${1-}" in
+    tag) cat <<'EOF'
+mto tag [name] [dir] [--force]
+  Tag a directory (default: the current one) so you can jump back to it.
+  Without a name the next free t1, t2, … is used. Tagging an existing name
+  again moves it. Every tag also becomes a command: type its name to go there.
+  --force   allow a name that hides an existing command
+EOF
+    ;;
+    go) cat <<'EOF'
+mto go <name>
+  Jump to a tag. An exact name wins, then a unique prefix, then a unique part
+  of the name or directory. With several matches you get a picker. If no tag
+  matches, the best match from your visited directories is used (like mto z).
+  Without a name: pick a tag interactively.
+EOF
+    ;;
+    tags) echo "mto tags [--plain]   list tags (--plain: tab-separated, for scripts)" ;;
+    untag) cat <<'EOF'
+mto untag <name>...      remove tags
+mto untag --missing      remove tags whose directory no longer exists
+mto untag --all [-y]     remove every tag
+EOF
+    ;;
+    z) cat <<'EOF'
+mto z <part>...
+  Jump to the directory you use most that matches all parts, in order
+  ("mto z api hand" finds ~/code/api/handlers). Ranking combines how often and
+  how recently you were there. Without parts: pick from your top directories.
+  Visits are recorded by the shell integration; MEMENTO_NO_HISTORY=1 turns it off.
+EOF
+    ;;
+    alias) cat <<'EOF'
+mto alias                        list aliases
+mto alias <name> <command...>    add or change an alias
+mto alias <name>                 show one alias
+mto unalias <name>... | --all    remove aliases
+  Aliases are stored by Memento and loaded in every shell; no restart needed.
+EOF
+    ;;
+    script) cat <<'EOF'
+mto script add <file> [name] [--move] [--force]   copy a script in and make it a command
+mto script new <name>                             create a script from a template and edit it
+mto script edit <name>                            open a script in $EDITOR
+mto script rm <name>                              remove a script
+mto script ls | mto scripts                       list scripts with their description
+mto script path <name>                            print where a script is stored
+  The first comment line of a script is shown as its description.
+EOF
+    ;;
+    install) cat <<'EOF'
+mto install [bash|zsh] [--rc file]
+  Adds one line to your shell's rc file (~/.zshrc or ~/.bashrc) that loads
+  Memento. A backup of the rc file is made first. Run it again any time; it
+  only adds the line once.
+EOF
+    ;;
+    uninstall) echo "mto uninstall [--purge] [-y]   remove the rc line; --purge also deletes your data" ;;
+    migrate) cat <<'EOF'
+mto migrate [--dry-run] [--rc file] [--script-dir dir]
+  Memento 1 wrote tags, aliases and scripts straight into your rc file.
+  This imports them into Memento 2 and removes those lines (after a backup).
+  Scripts are copied from --script-dir (default /usr/local/bin).
+EOF
+    ;;
+    export | import) echo "mto export [file]   write tags and aliases to a file (or stdout)
+mto import <file>   read them back (existing names are overwritten)" ;;
+    run) echo "mto run <name> [args...]   run a managed script or alias" ;;
+    rename) echo "mto rename <old> <new>   rename a tag, alias or script" ;;
+    doctor) echo "mto doctor   check the installation, broken tags and name clashes" ;;
+    demo) echo "mto demo [bash|zsh]   start a throwaway shell with sample tags, aliases and a script" ;;
+    ls) echo "mto ls   show all tags, aliases and scripts" ;;
+    "") usage ;;
+    *) die "no help for '$1'" ;;
+  esac
+}
+
+# ----------------------------------------------------------------------- main
+
+main() {
+  local cmd="${1-}"
+  [ $# -gt 0 ] && shift
+  case "$cmd" in
+    "") cmd_menu ;;
+    go | cd) cmd_go "$@" ;;
+    tag | t) cmd_tag "$@" ;;
+    tags) cmd_tags "$@" ;;
+    untag) cmd_untag "$@" ;;
+    z | jump) cmd_z "$@" ;;
+    recent) cmd_recent "$@" ;;
+    alias) cmd_alias "$@" ;;
+    aliases) cmd_aliases ;;
+    unalias) cmd_unalias "$@" ;;
+    script) cmd_script "$@" ;;
+    scripts) cmd_scripts ;;
+    run) cmd_run "$@" ;;
+    rename | mv) cmd_rename "$@" ;;
+    ls | list) cmd_ls ;;
+    menu) cmd_menu ;;
+    install) cmd_install "$@" ;;
+    uninstall) cmd_uninstall "$@" ;;
+    init) cmd_init "$@" ;;
+    doctor) cmd_doctor ;;
+    export) cmd_export "$@" ;;
+    import) cmd_import "$@" ;;
+    migrate) cmd_migrate "$@" ;;
+    demo) cmd_demo "$@" ;;
+    help) help_for "${1-}" ;;
+    -h | --help) usage ;;
+    version | -v | --version) echo "memento $MEMENTO_VERSION" ;;
+    _defs) cmd__defs "$@" ;;
+    _visit) cmd__visit "$@" ;;
+    _names) cmd__names "$@" ;;
+
+    # Memento 1 flags keep working.
+    -t | --tag) cmd_tag "$@" ;;
+    -a | --alias) cmd_alias "$@" ;;
+    -s | --script) script_add "$@" ;;
+    -es | --edit-script) ensure_home; script_edit "${1#_mto_}" ;;
+    -rs | --remove-script) ensure_home; script_rm "${1#_mto_}" ;;
+    -ra | --remove-alias) cmd_unalias "$@" ;;
+    -rma | --remove-all-aliases) cmd_unalias --all ;;
+    -rta | --remove-all-tags) cmd_untag --all ;;
+    -ls | --list) cmd_ls ;;
+    -ia) cmd_menu ;;
+    -i | --init) cmd_install "$@" ;;
+    -rmto) cmd_uninstall "$@" ;;
+    -e | --exec) info "not needed any more: changes are picked up automatically" ;;
+
+    *)
+      # "mto <tag>" is a shortcut for "mto go <tag>"
+      if [ -f "$TAGS" ] && (resolve_tag "$cmd") </dev/null >/dev/null 2>&1; then
+        cmd_go "$cmd" "$@"
+      else
+        die "unknown command '$cmd' (see: mto help)"
+      fi
+      ;;
+  esac
+}
+
+main "$@"
