@@ -205,9 +205,9 @@ mto() { "$MTO_BASH" "$MTO" "$@"; }
 
 @test "_defs output defines working aliases in bash" {
   mto tag web "$P/website"
-  mto alias say "echo 'it'\''s \$((1+1))'"
+  mto alias sayit "echo 'it'\''s \$((1+1))'"
   run bash -c "shopt -s expand_aliases; eval \"\$('$MTO_BASH' '$MTO' _defs bash)\"
-say
+sayit
 alias web"
   [ "${lines[0]}" = "it's \$((1+1))" ]
   [ "${lines[1]}" = "alias web='mto go web'" ]
