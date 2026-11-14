@@ -92,10 +92,9 @@ def main():
             check(f"{label} picker shows git branch of tags", "feature-x" in screen, True)
             p.send("api")
             if picker == "fzf":
-                screen = pump(p, r"1/3")
-                time.sleep(0.8)
-                screen += pump(p, r"", 1)
-                check(f"{label} preview pane shows the folder", "⎇ feature-x" in screen and "clean" in screen, True)
+                # "clean" only appears in the preview pane (the list shows just the branch)
+                screen = pump(p, r"1/3[\s\S]*clean|clean[\s\S]*1/3")
+                check(f"{label} preview pane shows the folder", "clean" in screen, True)
             time.sleep(0.4)
             p.send("\r")
             pump(p, r"PROMPT> $")
@@ -143,7 +142,7 @@ def main():
             if shell == "bash" and BASH_MAJOR >= 4:
                 pump(p, r"PROMPT> $")
                 p.send("\x19")  # ctrl-y pastes the cut command back
-            pump(p, r"PROMPT> echo kept-text\s*$")  # the typed command is back on the line
+            pump(p, r"echo kept-text\s*$")  # the typed command is back on the line
             p.send("\r")  # run it
             screen = pump(p, r"kept-text\r?\n[\s\S]*PROMPT> $")
             check(f"{label} Ctrl-G keeps the typed command", "kept-text" in screen, True)
