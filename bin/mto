@@ -285,7 +285,7 @@ _menu() {
 
     IFS= read -rsn1 key <&3 || key=$'\004'
     case "$key" in
-      "")  # enter
+      "" | $'\r' | $'\n')  # enter (\r when readline still owns the terminal)
         if [ "$n" -gt 0 ]; then
           printf '\033[%dA\r\033[J\033[?25h' "$drawn" >&3
           trap - INT TERM
