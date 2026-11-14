@@ -62,6 +62,8 @@ def main():
     projects = os.path.join(home, "p")
     for d in ("website", "api", "docs"):
         os.makedirs(os.path.join(projects, d))
+    # make "api" a git repository so previews have something to show
+    pexpect.run("git init -q -b feature-x", cwd=os.path.join(projects, "api"))
     env = {
         "HOME": home, "MEMENTO_HOME": os.path.join(home, ".mto"), "TERM": "xterm-256color",
         "PATH": os.environ["PATH"], "PS1": "PROMPT> ", "PROMPT": "PROMPT> ", "NO_COLOR": "1",
@@ -85,8 +87,14 @@ def main():
             pump(p, r"PROMPT> $")
 
             p.sendline("mto go")
-            pump(p, r"3/3")
+            screen = pump(p, r"3/3[\s\S]*feature-x|feature-x[\s\S]*3/3")
+            check(f"{label} picker shows git branch of tags", "feature-x" in screen, True)
             p.send("api")
+            if picker == "fzf":
+                screen = pump(p, r"1/3")
+                time.sleep(0.8)
+                screen += pump(p, r"", 1)
+                check(f"{label} preview pane shows the folder", "⎇ feature-x" in screen and "clean" in screen, True)
             time.sleep(0.4)
             p.send("\r")
             pump(p, r"PROMPT> $")
@@ -119,6 +127,26 @@ def main():
                 p.sendline('echo ST"$?"US')
                 p.expect(r"ST(\d+)US")
                 check(f"{label} cancel exit status", p.match.group(1), "130")
+
+            # Ctrl-G at the prompt opens the jump picker (zsh keeps the typed text)
+            p.sendline("cd /")
+            pump(p, r"PROMPT> $")
+            typed = "echo kept-text" if shell == "zsh" else ""
+            p.send(typed)
+            time.sleep(0.3)
+            p.send("\x07")
+            pump(p, r"3/3")
+            p.send("docs")
+            time.sleep(0.4)
+            p.send("\r")
+            time.sleep(0.6)
+            if shell == "zsh":
+                p.send("\r")  # run the line that was being typed
+                screen = pump(p, r"kept-text\r?\n.*PROMPT> $")
+                check(f"{label} Ctrl-G keeps the typed command", "kept-text" in screen, True)
+            else:
+                pump(p, r"PROMPT> $")
+            check(f"{label} Ctrl-G jumps", where(p), os.path.join(projects, "docs"))
 
             p.sendline("exit")
             p.expect(pexpect.EOF)

@@ -408,3 +408,84 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"everything looks good"* ]]
 }
+
+# ------------------------------------------------------------- 2.1 features
+
+@test "go into a directory inside a tag: web/src, web src, mto web/src" {
+  mto tag web "$P/website"
+  [ "$(mto go web/src)" = "$P/website/src" ]
+  [ "$(mto go web src)" = "$P/website/src" ]
+  [ "$(mto go we/src)" = "$P/website/src" ]
+  [ "$(mto web/src)" = "$P/website/src" ]
+  [ "$(mto go web/)" = "$P/website" ]
+  run mto go web nope
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"'web nope'"* ]]
+}
+
+@test "tags show the git branch and number of changed files" {
+  command -v git >/dev/null || skip "git not installed"
+  git -C "$P/api" init -q
+  git -C "$P/api" checkout -q -b feature-y
+  touch "$P/api/new.txt"
+  mto tag api "$P/api"
+  mto tag web "$P/website"
+  run mto tags
+  [[ "$output" == *"⎇ feature-y ±1"* ]]
+  MEMENTO_NO_GIT=1 run mto tags
+  [[ "$output" != *"feature-y"* ]]
+}
+
+@test "preview shows folders, git, aliases and scripts" {
+  command -v git >/dev/null || skip "git not installed"
+  git -C "$P/api" init -q
+  git -C "$P/api" checkout -q -b main-x
+  touch "$P/api/readme.md"
+  mto tag api "$P/api"
+  run mto _preview tag api
+  [[ "$output" == *"⎇ main-x"* ]]
+  [[ "$output" == *"handlers/"* ]]
+  [[ "$output" == *"readme.md"* ]]
+  [[ "$output" != *".git/"* ]]
+  mto alias gs 'git status --short'
+  run mto _preview alias gs
+  [[ "$output" == *"git status --short"* ]]
+  printf '#!/bin/sh\n# hi\necho hi\n' >"$BATS_TEST_TMPDIR/hi.sh"
+  mto script add "$BATS_TEST_TMPDIR/hi.sh"
+  run mto _preview script hi
+  [[ "$output" == *"echo hi"* ]]
+}
+
+@test "stats charts visits and lists tags not used in 30 days" {
+  mto tag web "$P/website"
+  mto tag api "$P/api"
+  mto tag old "$BATS_TEST_TMPDIR/sp ace/dir"
+  for i in 1 2 3 4; do mto _visit "$P/website"; done
+  mto _visit "$P/api/handlers"
+  run mto stats
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"★ web"*"4"*"█"* ]]
+  [[ "$output" == *"5 visits to 2 directories · 3 tags · 0 aliases · 0 scripts"* ]]
+  [[ "$output" == *"Not visited in 30 days: old"* ]]
+  [[ "$output" != *"30 days: api"* ]]
+}
+
+@test "open passes the resolved directory to an app" {
+  mto tag web "$P/website"
+  run mto open web echo
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$P/website"* ]]
+  MEMENTO_OPEN=echo run mto open web/src
+  [[ "${lines[1]}" == "$P/website/src" ]]
+  run mto open web no-such-app-xyz
+  [ "$status" -eq 1 ]
+}
+
+@test "init binds Ctrl-G for the jump picker, MEMENTO_KEY can change or disable it" {
+  run mto init zsh
+  [[ "$output" == *'bindkey "${MEMENTO_KEY-^G}" _mto_jump_widget'* ]]
+  run mto init bash
+  [[ "$output" == *"_mto_jump_key"* ]]
+  run zsh -f -c "MEMENTO_KEY='^O'; zmodload zsh/zle; eval \"\$('$MTO_BASH' '$MTO' init zsh)\"; bindkey '^O'" 2>/dev/null
+  if command -v zsh >/dev/null; then [[ "$output" == *"_mto_jump_widget"* ]]; fi
+}
