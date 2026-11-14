@@ -46,8 +46,8 @@ Press **Ctrl-G** at any prompt to get one list of your tags (★) and recently v
 Type to filter, press enter, and you're there. With fzf installed, a preview pane shows what's
 inside each folder, its git branch, whether it has uncommitted changes, and its last commit.
 
-In zsh, whatever you were typing stays on the command line. In bash (4+), a half-typed command is
-saved to your history first, so arrow-up brings it back. To use another key, set `MEMENTO_KEY`
+In zsh, whatever you were typing stays on the command line. In bash, a half-typed command is cut
+first: press Ctrl-Y to paste it back. To use another key, set `MEMENTO_KEY`
 before the `mto init` line (zsh: `MEMENTO_KEY='^O'`, bash: `MEMENTO_KEY='\C-o'`). Set it to an
 empty value to turn the key off.
 

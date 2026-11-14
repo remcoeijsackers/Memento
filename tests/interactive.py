@@ -131,21 +131,21 @@ def main():
             # Ctrl-G at the prompt opens the jump picker (zsh keeps the typed text)
             p.sendline("cd /")
             pump(p, r"PROMPT> $")
-            typed = "echo kept-text" if shell == "zsh" else ""
-            p.send(typed)
+            p.send("echo kept-text")
             time.sleep(0.3)
             p.send("\x07")
             pump(p, r"3/3")
             p.send("docs")
             time.sleep(0.4)
             p.send("\r")
-            time.sleep(0.6)
-            if shell == "zsh":
-                p.send("\r")  # run the line that was being typed
-                screen = pump(p, r"kept-text\r?\n.*PROMPT> $")
-                check(f"{label} Ctrl-G keeps the typed command", "kept-text" in screen, True)
-            else:
+            time.sleep(0.8)
+            if shell == "bash":
                 pump(p, r"PROMPT> $")
+                p.send("\x19")  # ctrl-y pastes the cut command back
+                time.sleep(0.3)
+            p.send("\r")  # run the line that was being typed
+            screen = pump(p, r"kept-text\r?\n[\s\S]*PROMPT> $")
+            check(f"{label} Ctrl-G keeps the typed command", "kept-text" in screen, True)
             check(f"{label} Ctrl-G jumps", where(p), os.path.join(projects, "docs"))
 
             p.sendline("exit")

@@ -485,7 +485,7 @@ EOF
   run mto init zsh
   [[ "$output" == *'bindkey "${MEMENTO_KEY-^G}" _mto_jump_widget'* ]]
   run mto init bash
-  [[ "$output" == *"_mto_jump_key"* ]]
+  [[ "$output" == *"mto go </dev/tty"* ]]
   run zsh -f -c "MEMENTO_KEY='^O'; zmodload zsh/zle; eval \"\$('$MTO_BASH' '$MTO' init zsh)\"; bindkey '^O'" 2>/dev/null
   if command -v zsh >/dev/null; then [[ "$output" == *"_mto_jump_widget"* ]]; fi
 }
