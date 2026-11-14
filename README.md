@@ -47,7 +47,8 @@ Type to filter, press enter, and you're there. With fzf installed, a preview pan
 inside each folder, its git branch, whether it has uncommitted changes, and its last commit.
 
 In zsh, whatever you were typing stays on the command line. In bash, a half-typed command is cut
-first: press Ctrl-Y to paste it back. To use another key, set `MEMENTO_KEY`
+first: press Ctrl-Y to paste it back. (On macOS's old bash 3.2 your text simply stays, and Memento
+prints the new directory because that bash can't redraw its prompt.) To use another key, set `MEMENTO_KEY`
 before the `mto init` line (zsh: `MEMENTO_KEY='^O'`, bash: `MEMENTO_KEY='\C-o'`). Set it to an
 empty value to turn the key off.
 
