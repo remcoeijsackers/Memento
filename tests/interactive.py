@@ -143,8 +143,8 @@ def main():
             if shell == "bash" and BASH_MAJOR >= 4:
                 pump(p, r"PROMPT> $")
                 p.send("\x19")  # ctrl-y pastes the cut command back
-                time.sleep(0.3)
-            p.send("\r")  # run the line that was being typed
+            pump(p, r"PROMPT> echo kept-text\s*$")  # the typed command is back on the line
+            p.send("\r")  # run it
             screen = pump(p, r"kept-text\r?\n[\s\S]*PROMPT> $")
             check(f"{label} Ctrl-G keeps the typed command", "kept-text" in screen, True)
             check(f"{label} Ctrl-G jumps", where(p), os.path.join(projects, "docs"))
