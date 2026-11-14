@@ -90,18 +90,21 @@ def main():
             p.sendline("mto go")
             screen = pump(p, r"3/3[\s\S]*feature-x|feature-x[\s\S]*3/3")
             check(f"{label} picker shows git branch of tags", "feature-x" in screen, True)
+            time.sleep(0.5)
             p.send("api")
             if picker == "fzf":
                 # "clean" only appears in the preview pane (the list shows just the branch)
                 screen = pump(p, r"1/3[\s\S]*clean|clean[\s\S]*1/3")
                 check(f"{label} preview pane shows the folder", "clean" in screen, True)
-            time.sleep(0.4)
+            else:
+                pump(p, r"1/3")
             p.send("\r")
             pump(p, r"PROMPT> $")
             check(f"{label} filter + enter", where(p), os.path.join(projects, "api"))
 
             p.sendline("cd / && mto go")
             pump(p, r"3/3")
+            time.sleep(0.5)
             p.send("\x1b[B")
             p.send("\x1b[B")
             time.sleep(0.4)
@@ -135,8 +138,9 @@ def main():
             time.sleep(0.3)
             p.send("\x07")
             pump(p, r"3/3")
+            time.sleep(0.5)  # let the picker take over the terminal before typing
             p.send("docs")
-            time.sleep(0.4)
+            pump(p, r"1/3")  # the filter has been applied
             p.send("\r")
             time.sleep(0.8)
             if shell == "bash" and BASH_MAJOR >= 4:
