@@ -5,7 +5,7 @@
 # Works with bash 3.2+ (the macOS default) and zsh. Data lives in $MEMENTO_HOME
 # (default: ~/.local/share/memento), never inside your shell's rc file.
 
-MEMENTO_VERSION="2.0.0"
+MEMENTO_VERSION="2.1.0"
 
 MEMENTO_HOME="${MEMENTO_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/memento}"
 TAGS="$MEMENTO_HOME/tags"
@@ -38,6 +38,18 @@ else
   O_CYAN=""; O_GREEN=""; O_RED=""; O_DIM=""; O_BOLD=""; O_PURPLE=""; O_RESET=""
 fi
 
+if [ -z "${NO_COLOR-}" ]; then
+  P_BOLD=$'\033[1m'; P_CYAN=$'\033[36m'; P_PURPLE=$'\033[35m'; P_BLUE=$'\033[34m'
+  P_DIM=$'\033[2m'; P_RED=$'\033[31m'; P_GREEN=$'\033[32m'; P_RESET=$'\033[0m'
+else
+  P_BOLD=""; P_CYAN=""; P_PURPLE=""; P_BLUE=""; P_DIM=""; P_RED=""; P_GREEN=""; P_RESET=""
+fi
+
+# What the next pick() shows in fzf's preview pane: a kind (dir, tag, alias,
+# script) and one key per item.
+PICK_KIND=""
+PICK_KEYS=()
+
 info() { printf '%s\n' "$*" >&2; }
 ok() { printf '%s✔%s %s\n' "$C_GREEN" "$C_RESET" "$*" >&2; }
 warn() { printf '%swarning:%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
@@ -53,6 +65,20 @@ pretty_path() {
 }
 
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+plural() { # count singular [plural]
+  if [ "$1" = 1 ]; then printf '1 %s' "$2"; else printf '%s %s' "$1" "${3:-${2}s}"; fi
+}
+
+# "main ±3" for a git work tree (branch, number of changed files), else nothing.
+git_summary() {
+  [ -z "${MEMENTO_NO_GIT-}" ] && [ -d "$1" ] && command -v git >/dev/null 2>&1 || return 0
+  local branch changes
+  branch="$(git -C "$1" symbolic-ref --short -q HEAD 2>/dev/null || git -C "$1" rev-parse --short HEAD 2>/dev/null)" || return 0
+  [ -n "$branch" ] || return 0
+  changes="$(git -C "$1" status --porcelain 2>/dev/null | awk 'END { print NR }')"
+  if [ "${changes:-0}" -gt 0 ]; then printf '%s ±%s' "$branch" "$changes"; else printf '%s' "$branch"; fi
+}
 
 has_tty() { [ -t 0 ] && [ -t 2 ] && { : </dev/tty; } 2>/dev/null; }
 
@@ -186,13 +212,19 @@ pick() {
   [ $# -gt 0 ] || return 1
   if use_fzf && has_tty; then
     local out
+    local -a preview
+    preview=()
+    if [ -n "$PICK_KIND" ]; then
+      preview=(--preview "$(printf '%q' "$SELF") _preview $PICK_KIND {2}"
+        --preview-window 'right,50%,border-left,<40(down,50%,border-top)')
+    fi
     out="$(
       i=0
       for item in "$@"; do
-        printf '%s\t%s\n' "$i" "$item"
+        printf '%s\t%s\t%s\n' "$i" "${PICK_KEYS[$i]-}" "$item"
         i=$((i + 1))
-      done | fzf --height=40% --layout=reverse --border=rounded --prompt="$prompt › " \
-        --delimiter="$TAB" --with-nth=2.. --no-multi --ansi
+      done | fzf --height=60% --layout=reverse --border=rounded --prompt="$prompt › " \
+        --delimiter="$TAB" --with-nth=3.. --no-multi --ansi "${preview[@]}"
     )" || return 1
     printf '%s\n' "${out%%"$TAB"*}"
     return 0
@@ -357,6 +389,8 @@ resolve_tag() {
       labels+=("$(printf '%-16s %s' "$name" "$(pretty_path "$(store_get "$TAGS" "$name")")")")
     done
     local idx
+    PICK_KIND=tag
+    PICK_KEYS=("${matches[@]}")
     idx="$(pick "which '$q'" "${labels[@]}")" || exit 130
     echo "${matches[$idx]}"
     return 0
@@ -365,45 +399,94 @@ resolve_tag() {
   exit 2
 }
 
-cmd_go() {
-  [ $# -ge 1 ] || { cmd_pick_tag; return; }
-  [ "$1" = "-h" ] || [ "$1" = "--help" ] && { help_for go; return 0; }
+# go_target ARGS -> prints the directory "mto go ARGS" should go to.
+#   web          a tag (exact, prefix or part of the name)
+#   web/src      a directory inside a tag (also: web src)
+#   anything     otherwise the best match among visited directories
+#   (nothing)    pick from tags and recent directories
+go_target() {
+  [ $# -ge 1 ] || { pick_dir; return; }
   ensure_home
-  local name path status
+  local name="" sub="" path status
+  local -a args
+  args=("$@")
+  if [ $# -gt 1 ] && store_has "$TAGS" "$1"; then
+    name="$1"
+    shift
+    sub="$(IFS=/; printf '%s' "$*")"
+  elif [ $# -eq 1 ] && [ "${1#*/}" != "$1" ]; then
+    name="$(resolve_tag "${1%%/*}")"
+    status=$?
+    [ $status -eq 2 ] || [ $status -eq 130 ] && exit $status
+    if [ $status -eq 0 ]; then sub="${1#*/}"; else name=""; fi
+  fi
+  if [ -n "$name" ]; then
+    path="$(store_get "$TAGS" "$name")"
+    [ -d "$path" ] || die "tag '$name' points to $(pretty_path "$path"), which no longer exists (mto tag $name <dir> to fix, mto untag $name to remove)"
+    sub="${sub%/}"
+    if [ -z "$sub" ]; then echo "$path"; return 0; fi
+    if [ -d "$path/$sub" ]; then (cd "$path/$sub" && pwd); return 0; fi
+  fi
+  set -- "${args[@]}"
   name="$(resolve_tag "$*")"
   status=$?
   [ $status -eq 2 ] || [ $status -eq 130 ] && exit $status
   if [ $status -eq 0 ]; then
     path="$(store_get "$TAGS" "$name")"
     [ -d "$path" ] || die "tag '$name' points to $(pretty_path "$path"), which no longer exists (mto tag $name <dir> to fix, mto untag $name to remove)"
-    emit_cd "$path"
+    echo "$path"
     return 0
   fi
   # No tag: fall back to frequently visited directories.
   if path="$(z_best "$@")"; then
     info "${C_DIM}no tag '$*'; jumping to $(pretty_path "$path")${C_RESET}"
-    emit_cd "$path"
+    echo "$path"
     return 0
   fi
   die "no tag or recent directory matches '$*' (see: mto tags)"
 }
 
-cmd_pick_tag() {
-  ensure_home
-  local -a names labels
-  local name path label idx
-  names=()
-  labels=()
-  while IFS="$TAB" read -r name path; do
-    names+=("$name")
-    label="$(printf '%-16s %s' "$name" "$(pretty_path "$path")")"
-    [ -d "$path" ] || label="$label  (missing)"
-    labels+=("$label")
-  done <"$TAGS"
-  [ ${#names[@]} -gt 0 ] || die "no tags yet: run 'mto tag' in a directory you want to come back to"
-  idx="$(pick "tags" "${labels[@]}")" || return 130
-  cmd_go "${names[$idx]}"
+cmd_go() {
+  case "${1-}" in -h | --help) help_for go; return 0 ;; esac
+  local path status
+  path="$(go_target "$@")"
+  status=$?
+  [ $status -eq 0 ] || exit $status
+  emit_cd "$path"
 }
+
+# One picker for everywhere you can go: tags first (★), then recent directories.
+pick_dir() {
+  ensure_home
+  local -a keys labels
+  local name path score git idx width=6
+  keys=()
+  labels=()
+  while IFS="$TAB" read -r name path; do [ ${#name} -gt "$width" ] && width=${#name}; done <"$TAGS"
+  while IFS="$TAB" read -r name path; do
+    git="$(git_summary "$path")"
+    keys+=("$path")
+    if [ -d "$path" ]; then
+      labels+=("$(printf '★ %-*s  %s%s' "$width" "$name" "$(pretty_path "$path")" "${git:+   ⎇ $git}")")
+    else
+      labels+=("$(printf '★ %-*s  %s  (missing)' "$width" "$name" "$(pretty_path "$path")")")
+    fi
+  done <"$TAGS"
+  while IFS="$TAB" read -r score path; do
+    [ -d "$path" ] || continue
+    awk -F'\t' -v p="$path" '$2 == p { found = 1 } END { exit !found }' "$TAGS" && continue
+    keys+=("$path")
+    labels+=("$(printf '· %-*s  %s' "$width" "${path##*/}" "$(pretty_path "$path")")")
+    [ ${#keys[@]} -ge 60 ] && break
+  done < <(z_rank)
+  [ ${#keys[@]} -gt 0 ] || die "no tags or visited directories yet: run 'mto tag' in a directory you want to come back to"
+  PICK_KIND=dir
+  PICK_KEYS=("${keys[@]}")
+  idx="$(pick "jump" "${labels[@]}")" || exit 130
+  echo "${keys[$idx]}"
+}
+
+cmd_pick_tag() { cmd_go; }
 
 cmd_tags() {
   local plain=0
@@ -414,11 +497,17 @@ cmd_tags() {
     info "no tags yet: run ${C_BOLD}mto tag${C_RESET} (or ${C_BOLD}mto tag <name>${C_RESET}) in a directory"
     return 0
   fi
-  local name path width=4
-  while IFS="$TAB" read -r name path; do [ ${#name} -gt "$width" ] && width=${#name}; done <"$TAGS"
+  local name path width=4 pwidth=4 pretty git
+  while IFS="$TAB" read -r name path; do
+    [ ${#name} -gt "$width" ] && width=${#name}
+    pretty="$(pretty_path "$path")"
+    [ ${#pretty} -gt "$pwidth" ] && pwidth=${#pretty}
+  done <"$TAGS"
   while IFS="$TAB" read -r name path; do
     if [ -d "$path" ]; then
-      printf '  %s%-*s%s  %s\n' "$O_CYAN" "$width" "$name" "$O_RESET" "$(pretty_path "$path")"
+      git="$(git_summary "$path")"
+      printf '  %s%-*s%s  %-*s  %s%s%s\n' "$O_CYAN" "$width" "$name" "$O_RESET" "$pwidth" "$(pretty_path "$path")" \
+        "$O_PURPLE" "${git:+⎇ $git}" "$O_RESET"
     else
       printf '  %s%-*s%s  %s %s(missing)%s\n' "$O_CYAN" "$width" "$name" "$O_RESET" "$(pretty_path "$path")" "$O_RED" "$O_RESET"
     fi
@@ -541,6 +630,8 @@ cmd_z() {
       [ ${#paths[@]} -ge 50 ] && break
     done < <(z_rank)
     [ ${#paths[@]} -gt 0 ] || die "no history yet: Memento learns the directories you visit once 'mto install' is done"
+    PICK_KIND=dir
+    PICK_KEYS=("${paths[@]}")
     idx="$(pick "recent" "${labels[@]}")" || return 130
     emit_cd "${paths[$idx]}"
     return 0
@@ -762,6 +853,7 @@ cmd_menu() {
   options+=("Add an alias"); actions+=(newalias)
   options+=("Show everything"); actions+=(ls)
   local idx
+  PICK_KIND=""
   idx="$(pick "memento" "${options[@]}")" || return 130
   case "${actions[$idx]}" in
     tags) cmd_pick_tag ;;
@@ -802,6 +894,8 @@ menu_pick_runnable() {
       labels+=("$(printf '%-16s %s' "$name" "$(script_description "$SCRIPTS/$name")")")
     done < <(script_names)
   fi
+  if [ "$1" = aliases ]; then PICK_KIND="alias"; else PICK_KIND="script"; fi
+  PICK_KEYS=("${names[@]}")
   idx="$(pick "$1" "${labels[@]}")" || return 130
   name="${names[$idx]}"
   case "$1" in
@@ -809,6 +903,112 @@ menu_pick_runnable() {
     scripts) emit_command "$(printf '%q' "$SCRIPTS/$name")" ;;
     edit) script_edit "$name" ;;
   esac
+}
+
+# ------------------------------------------------------------- previews
+
+preview_dir() {
+  local dir="$1" branch changes last
+  printf '%s%s%s\n' "$P_BOLD$P_CYAN" "$(pretty_path "$dir")" "$P_RESET"
+  if [ ! -d "$dir" ]; then
+    printf '%sthis directory no longer exists%s\n' "$P_RED" "$P_RESET"
+    return 0
+  fi
+  if [ -z "${MEMENTO_NO_GIT-}" ] && command -v git >/dev/null 2>&1 &&
+    branch="$(git -C "$dir" symbolic-ref --short -q HEAD 2>/dev/null || git -C "$dir" rev-parse --short HEAD 2>/dev/null)" && [ -n "$branch" ]; then
+    changes="$(git -C "$dir" status --porcelain 2>/dev/null | awk 'END { print NR }')"
+    last="$(git -C "$dir" log -1 --format='%s · %cr' 2>/dev/null)"
+    printf '%s⎇ %s%s' "$P_PURPLE" "$branch" "$P_RESET"
+    if [ "${changes:-0}" -gt 0 ]; then printf '  %s%s changed%s' "$P_RED" "$changes" "$P_RESET"; else printf '  %sclean%s' "$P_GREEN" "$P_RESET"; fi
+    [ -n "$last" ] && printf '\n%s%s%s' "$P_DIM" "$last" "$P_RESET"
+    printf '\n'
+  fi
+  printf '\n'
+  # directories first, then files (a quick look, so ls is fine here)
+  # shellcheck disable=SC2012
+  ls -1Ap "$dir" 2>/dev/null | awk -v b="$P_BLUE" -v r="$P_RESET" '
+    $0 == ".git/" { next }
+    /\/$/ { d[++nd] = $0; next } { f[++nf] = $0 }
+    END { for (i = 1; i <= nd; i++) print b d[i] r; for (i = 1; i <= nf; i++) print f[i] }
+  ' | head -n 60
+}
+
+cmd__preview() {
+  local kind="${1-}" key="${2-}" value
+  case "$kind" in
+    dir) preview_dir "$key" ;;
+    tag) value="$(store_get "$TAGS" "$key")" && preview_dir "$value" ;;
+    alias)
+      printf '%salias %s%s\n\n' "$P_BOLD$P_CYAN" "$key" "$P_RESET"
+      store_get "$ALIASES" "$key"
+      ;;
+    script)
+      printf '%s%s%s  %s%s%s\n\n' "$P_BOLD$P_CYAN" "$key" "$P_RESET" "$P_DIM" "$(pretty_path "$SCRIPTS/$key")" "$P_RESET"
+      head -n 80 "$SCRIPTS/$key" 2>/dev/null
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------- stats
+
+cmd_stats() {
+  ensure_home
+  if [ ! -s "$HISTFILE_MTO" ]; then
+    info "no history yet: Memento records the directories you visit once 'mto install' is done"
+    return 0
+  fi
+  local now max count path last label len bar dirs visits name tagged stale=""
+  now="$(date +%s)"
+  dirs="$(store_count "$HISTFILE_MTO")"
+  visits="$(awk -F'\t' '{ s += $2 } END { print s + 0 }' "$HISTFILE_MTO")"
+  printf '%sWhere you spend your time%s\n\n' "$O_BOLD" "$O_RESET"
+  max=""
+  while IFS="$TAB" read -r path count last; do
+    [ -n "$max" ] || max="$count"
+    tagged="$(P="$path" awk -F'\t' '$2 == ENVIRON["P"] { print $1; exit }' "$TAGS")"
+    if [ -n "$tagged" ]; then label="★ $tagged"; else label="  ${path##*/}"; fi
+    [ ${#label} -gt 18 ] && label="${label:0:17}…"
+    len=$((count * 28 / max))
+    [ "$len" -lt 1 ] && len=1
+    bar="$(printf '%*s' "$len" '' | sed 's/ /█/g')$(printf '%*s' $((28 - len)) '')"
+    printf '  %s%*s %s%4s%s  %s%s%s  %s%s%s\n' "$label" $((18 - ${#label})) '' "$O_BOLD" "$count" "$O_RESET" \
+      "$O_PURPLE" "$bar" "$O_RESET" "$O_DIM" "$(pretty_path "$path")" "$O_RESET"
+  done < <(sort -t "$TAB" -k2,2nr "$HISTFILE_MTO" | head -n 10)
+
+  while IFS="$TAB" read -r name path; do
+    # the newest visit to the tagged directory or anything inside it
+    last="$(P="$path" awk -F'\t' '($1 == ENVIRON["P"] || index($1, ENVIRON["P"] "/") == 1) && $3 > m { m = $3 } END { if (m) print m }' "$HISTFILE_MTO")"
+    if [ -z "$last" ] || [ $((now - last)) -gt $((30 * 86400)) ]; then stale="$stale $name"; fi
+  done <"$TAGS"
+
+  printf '\n  %s%s · %s · %s · %s%s\n' "$O_DIM" "$(plural "$visits" visit) to $(plural "$dirs" directory directories)" \
+    "$(plural "$(store_count "$TAGS")" tag)" "$(plural "$(store_count "$ALIASES")" alias aliases)" \
+    "$(plural "$(script_names | awk 'END { print NR }')" script)" "$O_RESET"
+  if [ -n "$stale" ]; then
+    printf '\n  Not visited in 30 days:%s%s%s  %s(mto untag <name> to clean up)%s\n' "$O_CYAN" "$stale" "$O_RESET" "$O_DIM" "$O_RESET"
+  fi
+}
+
+# ------------------------------------------------------------------ open
+
+cmd_open() {
+  case "${1-}" in -h | --help) help_for open; return 0 ;; esac
+  local target status app
+  if [ $# -eq 0 ]; then target="$(go_target)"; else target="$(go_target "$1")"; fi
+  status=$?
+  [ $status -eq 0 ] || exit $status
+  app="${2:-${MEMENTO_OPEN:-}}"
+  if [ -z "$app" ]; then
+    if command -v code >/dev/null 2>&1; then app=code
+    elif [ "$(uname -s)" = Darwin ]; then app=open
+    elif command -v xdg-open >/dev/null 2>&1; then app=xdg-open
+    else die "no app to open folders with: pass one (mto open <tag> <app>) or set MEMENTO_OPEN"
+    fi
+  fi
+  command -v "${app%% *}" >/dev/null 2>&1 || die "'$app' not found"
+  ok "opening $(pretty_path "$target") with $app"
+  # shellcheck disable=SC2086 # allow "open -a Finder" style values
+  $app "$target"
 }
 
 # ------------------------------------------------------------ integration
@@ -894,6 +1094,19 @@ _mto_precmd() { _mto_sync; _mto_visit; }
 autoload -Uz add-zsh-hook
 add-zsh-hook precmd _mto_precmd
 
+# Ctrl-G (or $MEMENTO_KEY; empty disables) opens the jump picker from the prompt,
+# keeping whatever you were typing.
+_mto_jump_widget() {
+  zle -I
+  mto go </dev/tty
+  _mto_visit
+  zle reset-prompt
+}
+if [[ -n ${MEMENTO_KEY-^G} ]]; then
+  zle -N _mto_jump_widget
+  bindkey "${MEMENTO_KEY-^G}" _mto_jump_widget
+fi
+
 _mto_complete() {
   local -a subcommands names
   subcommands=(
@@ -904,13 +1117,14 @@ _mto_complete() {
     'doctor:check the setup' 'export:back up tags and aliases' 'import:restore a backup'
     'migrate:import entries from Memento 1' 'install:add the shell hook' 'uninstall:remove the shell hook'
     'demo:try Memento in a sandbox' 'help:show help' 'version:show the version'
+    'stats:where you spend your time' 'open:open a tag in your editor or file manager'
   )
   if (( CURRENT == 2 )); then
     _describe -t commands 'mto command' subcommands
     return
   fi
   case $words[2] in
-    go|untag) names=(${(f)"$("$_MEMENTO_BIN" _names tags)"}); compadd -a names ;;
+    go|untag|open) names=(${(f)"$("$_MEMENTO_BIN" _names tags)"}); compadd -a names ;;
     unalias) names=(${(f)"$("$_MEMENTO_BIN" _names aliases)"}); compadd -a names ;;
     run) names=(${(f)"$("$_MEMENTO_BIN" _names scripts)"} ${(f)"$("$_MEMENTO_BIN" _names aliases)"}); compadd -a names ;;
     rename) names=(${(f)"$("$_MEMENTO_BIN" _names all)"}); compadd -a names ;;
@@ -938,6 +1152,21 @@ EOF
     cat <<'EOF'
 
 _mto_prompt() { _mto_sync; _mto_visit; }
+
+# Ctrl-G (or $MEMENTO_KEY; empty disables) opens the jump picker from the prompt.
+# Bash can only redraw the prompt by submitting the line, so any half-typed
+# command is saved to history first (arrow up to get it back). Needs bash 4+.
+_mto_jump_key() {
+  if [ -n "$READLINE_LINE" ]; then history -s "$READLINE_LINE"; fi
+  READLINE_LINE=""
+  READLINE_POINT=0
+  mto go </dev/tty
+}
+if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ] && [ -n "${MEMENTO_KEY-\C-g}" ] && [[ $- == *i* ]]; then
+  bind -x '"\e[0mto~": _mto_jump_key'
+  bind "\"${MEMENTO_KEY-\C-g}\": \"\e[0mto~\C-m\""
+fi
+
 case ";${PROMPT_COMMAND-};" in
   *";_mto_prompt;"*) ;;
   *) PROMPT_COMMAND="_mto_prompt${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
@@ -946,10 +1175,10 @@ esac
 _mto_complete() {
   local cur=${COMP_WORDS[COMP_CWORD]} words=""
   if [ "$COMP_CWORD" -eq 1 ]; then
-    words="go tag tags untag z recent alias unalias script scripts run rename ls doctor export import migrate install uninstall demo help version"
+    words="go tag tags untag z recent stats open alias unalias script scripts run rename ls doctor export import migrate install uninstall demo help version"
   else
     case ${COMP_WORDS[1]} in
-      go|untag) words=$("$_MEMENTO_BIN" _names tags) ;;
+      go|untag|open) words=$("$_MEMENTO_BIN" _names tags) ;;
       unalias) words=$("$_MEMENTO_BIN" _names aliases) ;;
       run) words="$("$_MEMENTO_BIN" _names scripts) $("$_MEMENTO_BIN" _names aliases)" ;;
       rename) words=$("$_MEMENTO_BIN" _names all) ;;
@@ -1269,7 +1498,25 @@ cmd_demo() {
   sandbox="$(mktemp -d "${TMPDIR:-/tmp}/memento-demo.XXXXXX")" || die "cannot create a sandbox"
   shell="${1:-$(detect_shell)}"
   command -v "$shell" >/dev/null || shell=bash
-  mkdir -p "$sandbox/projects/website/src" "$sandbox/projects/api/handlers" "$sandbox/notes/2026"
+  mkdir -p "$sandbox/projects/website/src/components" "$sandbox/projects/website/public" \
+    "$sandbox/projects/api/handlers" "$sandbox/projects/api/models" "$sandbox/notes/2026"
+  touch "$sandbox/projects/website/package.json" "$sandbox/projects/website/README.md" \
+    "$sandbox/projects/website/src/App.tsx" "$sandbox/projects/api/main.go" "$sandbox/projects/api/go.mod" \
+    "$sandbox/notes/2026/ideas.md" "$sandbox/notes/todo.md"
+  if command -v git >/dev/null 2>&1; then
+    demo_repo() { # dir branch message...
+      local dir="$1" branch="$2"
+      shift 2
+      git -C "$dir" init -q 2>/dev/null && git -C "$dir" checkout -q -b "$branch" 2>/dev/null
+      for msg in "$@"; do
+        git -C "$dir" add -A >/dev/null 2>&1
+        git -C "$dir" -c user.name=demo -c user.email=demo@example.com commit -q --allow-empty -m "$msg" >/dev/null 2>&1
+      done
+    }
+    demo_repo "$sandbox/projects/website" main "Initial site" "Add pricing page"
+    demo_repo "$sandbox/projects/api" feature/login "Set up API" "Add login handler"
+    touch "$sandbox/projects/website/src/Pricing.tsx" "$sandbox/projects/website/public/logo.svg"
+  fi
   # shellcheck disable=SC2030,SC2031 # the sandbox home is only for this subshell
   (
     export MEMENTO_HOME="$sandbox/memento" MEMENTO_NO_HISTORY=""
@@ -1281,7 +1528,9 @@ cmd_demo() {
     # shellcheck disable=SC2016 # literal script text
     printf '#!/usr/bin/env bash\n# greet: says hello to whoever you name\necho "hello, ${1:-world}!"\n' >"$sandbox/greet"
     "$SELF" script add "$sandbox/greet" >/dev/null 2>&1
-    for d in projects/api/handlers projects/api projects/website/src notes/2026 notes/2026; do
+    for d in projects/website projects/website projects/website projects/website projects/website \
+      projects/website/src projects/website/src projects/website/src projects/api projects/api projects/api \
+      projects/api/handlers projects/api/handlers projects/website/src/components notes/2026; do
       "$SELF" _visit "$sandbox/$d"
     done
   )
@@ -1289,11 +1538,12 @@ cmd_demo() {
   banner="$(cat <<EOF
 printf '\n\033[35m● Memento demo\033[0m: a throwaway sandbox, deleted when you type exit.\n\n'
 printf '  try:  \033[1mmto\033[0m            interactive menu\n'
+printf '        \033[1mCtrl-G\033[0m         jump picker with previews, from any prompt\n'
 printf '        \033[1mwebsite\033[0m        jump to a tag (also: api, notes)\n'
-printf '        \033[1mmto go web\033[0m     fuzzy jump\n'
+printf '        \033[1mwebsite src\033[0m    …or straight into a folder inside it\n'
 printf '        \033[1mmto z hand\033[0m     jump to a visited directory by part of its name\n'
-printf '        \033[1mmto tag\033[0m        tag where you are\n'
-printf '        \033[1mmto ls\033[0m         everything at a glance\n'
+printf '        \033[1mmto tags\033[0m       tags with their git branch and changes\n'
+printf '        \033[1mmto stats\033[0m      where you spend your time\n'
 printf '        \033[1mgreet Remco\033[0m    a managed script\n\n'
 EOF
 )"
@@ -1332,11 +1582,14 @@ ${O_BOLD}Usage:${O_RESET} mto [command] [arguments]       ${O_DIM}(no command: i
 
 ${O_BOLD}Directories${O_RESET}
   ${O_CYAN}tag${O_RESET} [name] [dir]         tag the current (or given) directory; no name gives t1, t2, …
-  ${O_CYAN}go${O_RESET} <name>                jump to a tag (prefix or part of the name is enough)
+  ${O_CYAN}go${O_RESET} <name>[/sub/dir]      jump to a tag (prefix or part of the name is enough)
+  ${O_CYAN}Ctrl-G${O_RESET}                   at the prompt: pick from tags and recent directories
   ${O_CYAN}<name>${O_RESET}                   every tag is also a command: just type its name
   ${O_CYAN}tags${O_RESET}                     list tags          ${O_CYAN}untag${O_RESET} <name>|--missing|--all
   ${O_CYAN}z${O_RESET} <part...>              jump to the best match among directories you visited
   ${O_CYAN}recent${O_RESET}                   list frequently visited directories
+  ${O_CYAN}stats${O_RESET}                    where you spend your time, and tags you no longer use
+  ${O_CYAN}open${O_RESET} <name> [app]        open a tag in VS Code / Finder / \$MEMENTO_OPEN
 
 ${O_BOLD}Aliases & scripts${O_RESET}
   ${O_CYAN}alias${O_RESET} <name> <command>   add an alias (available immediately, in every terminal)
@@ -1370,11 +1623,13 @@ mto tag [name] [dir] [--force]
 EOF
     ;;
     go) cat <<'EOF'
-mto go <name>
+mto go <name>[/sub/dir]      (or: <name> sub dir)
   Jump to a tag. An exact name wins, then a unique prefix, then a unique part
-  of the name or directory. With several matches you get a picker. If no tag
+  of the name or directory. Add a path to land inside it: "mto go web/src",
+  or simply "web src". With several matches you get a picker. If no tag
   matches, the best match from your visited directories is used (like mto z).
-  Without a name: pick a tag interactively.
+  Without a name, or with Ctrl-G at the prompt: pick from tags and recent
+  directories, with a preview of each (folder contents, git branch, last commit).
 EOF
     ;;
     tags) echo "mto tags [--plain]   list tags (--plain: tab-separated, for scripts)" ;;
@@ -1429,6 +1684,8 @@ EOF
 mto import <file>   read them back (existing names are overwritten)" ;;
     run) echo "mto run <name> [args...]   run a managed script or alias" ;;
     rename) echo "mto rename <old> <new>   rename a tag, alias or script" ;;
+    stats) echo "mto stats   your most visited directories as a chart, and tags you haven't used in 30 days" ;;
+    open) echo "mto open [name] [app]   open a tag (or any go target) in an app: VS Code if installed, else Finder/xdg-open; set MEMENTO_OPEN to choose" ;;
     doctor) echo "mto doctor   check the installation, broken tags and name clashes" ;;
     demo) echo "mto demo [bash|zsh]   start a throwaway shell with sample tags, aliases and a script" ;;
     ls) echo "mto ls   show all tags, aliases and scripts" ;;
@@ -1450,6 +1707,8 @@ main() {
     untag) cmd_untag "$@" ;;
     z | jump) cmd_z "$@" ;;
     recent) cmd_recent "$@" ;;
+    stats) cmd_stats ;;
+    open) cmd_open "$@" ;;
     alias) cmd_alias "$@" ;;
     aliases) cmd_aliases ;;
     unalias) cmd_unalias "$@" ;;
@@ -1473,6 +1732,7 @@ main() {
     _defs) cmd__defs "$@" ;;
     _visit) cmd__visit "$@" ;;
     _names) cmd__names "$@" ;;
+    _preview) cmd__preview "$@" ;;
 
     # Memento 1 flags keep working.
     -t | --tag) cmd_tag "$@" ;;
@@ -1491,7 +1751,7 @@ main() {
 
     *)
       # "mto <tag>" is a shortcut for "mto go <tag>"
-      if [ -f "$TAGS" ] && (resolve_tag "$cmd") </dev/null >/dev/null 2>&1; then
+      if [ -f "$TAGS" ] && (resolve_tag "${cmd%%/*}") </dev/null >/dev/null 2>&1; then
         cmd_go "$cmd" "$@"
       else
         die "unknown command '$cmd' (see: mto help)"
